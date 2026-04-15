@@ -1,0 +1,403 @@
+{% extends 'base.html' %}
+{% block title %}Обзор — {{ month }}/{{ year }}{% endblock %}
+
+{% block content %}
+<!-- Фильтр месяца -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-bar-chart-line-fill text-primary me-2"></i>
+        Обзор расходов
+    </h4>
+    <form class="d-flex gap-2 align-items-center" method="get">
+        <select name="month" class="form-select form-select-sm" style="width:140px"
+                onchange="this.form.submit()">
+            {% for m_num, m_name in months %}
+                <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+            {% endfor %}
+        </select>
+        <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+               onchange="this.form.submit()">
+        <button class="btn grad-primary btn-sm" type="submit" title="Применить фильтр"><i class="bi bi-funnel"></i></button>
+    </form>
+</div>
+
+<!-- Итоговые карточки -->
+<div class="row g-3 mb-4 summary-cards">
+    <div class="col-md-4">
+        <div class="card summary-card grad-income h-100 float-card">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Доходы</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ total_income }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(total_income) }} ₽</div>
+                </div>
+                <i class="bi bi-arrow-down-circle" style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <a href="{{ url_for('income_list', year=year, month=month) }}"
+                   class="small text-white-50">все доходы →</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card summary-card grad-primary h-100 float-card">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Расходы</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ total_spent }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(total_spent) }} ₽</div>
+                </div>
+                <i class="bi bi-arrow-up-circle" style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <a href="{{ url_for('expenses_list', year=year, month=month) }}"
+                   class="small text-white-50">все расходы →</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card summary-card h-100 float-card
+            {% if balance >= 0 %}grad-balance{% else %}grad-danger{% endif %}">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Баланс</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ balance }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(balance) }} ₽</div>
+                </div>
+                <i class="bi {% if balance >= 0 %}bi-piggy-bank{% else %}bi-exclamation-triangle{% endif %}"
+                   style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <span class="small text-white-50">
+                    {% if balance >= 0 %}В запасе{% else %}Перерасход{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Категории -->
+    <div class="col-lg-7">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-grid-fill text-primary me-2"></i>По категориям
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for row in summary %}
+                    {% set spent = row.total|float %}
+                    {% set budget = budget_map.get(row.id, 0) %}
+                    {% if spent > 0 or budget > 0 %}
+                    <li class="list-group-item px-3 py-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span>
+                                <i class="bi {{ row.icon }} me-2" style="color:{{ row.color }}"></i>
+                                <strong>{{ row.name }}</strong>
+                            </span>
+                            <span class="fw-semibold">
+                                {{ "%.2f"|format(spent) }} ₽
+                                {% if budget > 0 %}
+                                    <span class="text-muted small">/ {{ "%.0f"|format(budget) }}</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% if budget > 0 %}
+                        {% set pct = [spent / budget * 100, 100]|min %}
+                        <div class="progress" style="height:7px;border-radius:6px">
+                            <div class="prog-bar-animated"
+                                 data-value="{{ pct|round|int }}"></div>
+                        </div>
+                        {% endif %}
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- График + последние -->
+    <div class="col-lg-5">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-pie-chart-fill text-primary me-2"></i>Диаграмма
+            </div>
+            <div class="card-body position-relative">
+                <div id="chartSkeleton" class="skeleton" style="height:230px;border-radius:50%;width:230px;margin:0 auto"></div>
+                <canvas id="pieChart" height="230" style="display:none"></canvas>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex justify-content-between">
+                <span><i class="bi bi-clock-history text-primary me-2"></i>Последние расходы</span>
+                <a href="{{ url_for('expenses_list', year=year, month=month) }}" class="small">все →</a>
+            </div>
+            <ul class="list-group list-group-flush">
+                {% for exp in recent %}
+                <li class="list-group-item px-3 py-2 stagger-item">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
+                                {{ exp.category.name }}
+                            </span>
+                            {% if not exp.is_planned %}
+                                <span class="badge bg-warning text-dark ms-1">незаплан.</span>
+                            {% endif %}
+                            <div class="small text-muted mt-1">{{ exp.description or '—' }}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-semibold">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
+                            <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m') }}</div>
+                        </div>
+                    </div>
+                </li>
+                {% else %}
+                <li class="list-group-item text-muted text-center py-3">Расходов пока нет</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════════════
+     БЛОК 1 — Сравнение по категориям  +  БЛОК 2 — Динамика 3 месяца
+════════════════════════════════════════════════════════════════════ -->
+<div class="row g-4 mt-2">
+    <div class="col-lg-7">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span><i class="bi bi-arrow-left-right text-primary me-2"></i>Сравнение по категориям</span>
+                <div class="compare-toggle d-flex gap-2">
+                    <button class="btn btn-sm active-mode" id="btnPrevMonth" type="button">vs прошлый месяц</button>
+                    <button class="btn btn-sm" id="btnPrevYear" type="button">vs прошлый год</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="stats-note">
+                    <i class="bi bi-info-circle"></i>
+                    Сравниваем <strong id="compareCurrent"></strong> с <strong id="compareWith"></strong>
+                </div>
+                <div id="catCompareList">
+                    <div class="skeleton mb-2" style="height:40px;border-radius:8px"></div>
+                    <div class="skeleton mb-2" style="height:40px;border-radius:8px"></div>
+                    <div class="skeleton"       style="height:40px;border-radius:8px"></div>
+                </div>
+                <div class="mt-3 pt-2 border-top" id="compareTotalRow" style="display:none">
+                    <div class="stat-trend-row">
+                        <span class="stat-trend-label"><i class="bi bi-sigma me-2 text-primary"></i>Итого расходов</span>
+                        <span class="stat-trend-val" id="compareTotalVal"></span>
+                        <span id="compareTotalDelta"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-calendar3 text-primary me-2"></i>Динамика за 3 месяца
+            </div>
+            <div class="card-body">
+                <div class="month-stat-wrap mb-3" id="monthDynamics">
+                    <div class="skeleton" style="flex:1;height:100px;border-radius:12px"></div>
+                    <div class="skeleton" style="flex:1;height:100px;border-radius:12px"></div>
+                    <div class="skeleton" style="flex:1;height:100px;border-radius:12px"></div>
+                </div>
+                <div class="small text-uppercase fw-semibold mb-2"
+                     style="letter-spacing:.06em;color:var(--bs-secondary-color)">Тренды за период</div>
+                <div id="monthTrends">
+                    <div class="skeleton mb-2" style="height:36px;border-radius:8px"></div>
+                    <div class="skeleton mb-2" style="height:36px;border-radius:8px"></div>
+                    <div class="skeleton"       style="height:36px;border-radius:8px"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const NEON_COLORS = [
+    '#4361ee', '#00b4d8', '#7209b7', '#00ffb8',
+    '#ee66ff', '#4cc9f0', '#f72585', '#4895ef',
+    '#00e5ff', '#b5179e', '#3a86ff', '#06d6a0',
+];
+
+let _chartInstance = null;
+let _chartData     = null;
+
+function isDark() {
+    return document.documentElement.getAttribute('data-bs-theme') === 'dark';
+}
+
+function renderChart(d) {
+    const canvas = document.getElementById('pieChart');
+    if (!canvas || !d || !d.data.length) return;
+
+    if (_chartInstance) { _chartInstance.destroy(); _chartInstance = null; }
+
+    const dark   = isDark();
+    const colors = dark
+        ? d.colors.map((_, i) => NEON_COLORS[i % NEON_COLORS.length])
+        : d.colors;
+    const cardBg = dark ? '#0c0c22' : '#ffffff';
+
+    _chartInstance = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: d.labels,
+            datasets: [{
+                data: d.data,
+                backgroundColor: colors,
+                borderWidth: 3,
+                borderColor: cardBg,
+                hoverOffset: 8,
+            }]
+        },
+        options: {
+            animation: { animateRotate: true, duration: 600 },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 12 },
+                        padding: 16,
+                        color: dark ? '#a0b4ff' : '#666',
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString('ru-RU')} ₽`
+                    }
+                }
+            }
+        }
+    });
+}
+
+fetch(`/api/chart-data?year={{ year }}&month={{ month }}`)
+    .then(r => r.json())
+    .then(d => {
+        _chartData = d;
+        const skeleton = document.getElementById('chartSkeleton');
+        const canvas   = document.getElementById('pieChart');
+        if (skeleton) skeleton.style.display = 'none';
+        if (canvas)   canvas.style.display   = '';
+        renderChart(d);
+    });
+
+// Перерисовываем чарт при смене темы
+const _themeObserver = new MutationObserver(() => {
+    if (_chartData) renderChart(_chartData);
+});
+_themeObserver.observe(document.documentElement, {
+    attributes: true, attributeFilter: ['data-bs-theme']
+});
+
+// ── Статистика: сравнение и динамика ──────────────────────────────
+function fmtRub(val) {
+    return val.toLocaleString('ru-RU', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' ₽';
+}
+
+function deltaBadgeHtml(delta) {
+    if (delta === null || delta === undefined) {
+        return '<span class="delta-badge delta-new"><i class="bi bi-plus-circle"></i> новая</span>';
+    }
+    if (delta === 0) {
+        return '<span class="delta-badge delta-zero">0%</span>';
+    }
+    const sign  = delta > 0 ? '+' : '';
+    const cls   = delta > 0 ? 'delta-up' : 'delta-down';
+    const arrow = delta > 0 ? 'bi-arrow-up' : 'bi-arrow-down';
+    return `<span class="delta-badge ${cls}"><i class="bi ${arrow}"></i>${sign}${delta}%</span>`;
+}
+
+function renderStats(data) {
+    const cmp = data.comparison;
+    const mon = data.monthly;
+
+    document.getElementById('compareCurrent').textContent = cmp.current_label;
+    document.getElementById('compareWith').textContent    = cmp.compare_label;
+
+    const listEl = document.getElementById('catCompareList');
+    if (!cmp.categories.length) {
+        listEl.innerHTML = '<p class="text-muted text-center py-3">Данных для сравнения нет</p>';
+    } else {
+        listEl.innerHTML = cmp.categories.map(c => `
+            <div class="cat-stat-row stagger-item">
+                <div class="cat-stat-icon" style="background:${c.color}22">
+                    <i class="bi ${c.icon}" style="color:${c.color}"></i>
+                </div>
+                <div class="cat-stat-name">${c.name}</div>
+                <div class="cat-stat-amount">${fmtRub(c.current)}</div>
+                <div class="cat-stat-delta">${deltaBadgeHtml(c.delta_pct)}</div>
+            </div>
+        `).join('');
+        listEl.querySelectorAll('.stagger-item').forEach((el, i) => {
+            el.style.setProperty('--i', i);
+            setTimeout(() => el.classList.add('stagger-visible'), 10);
+        });
+    }
+
+    const totalRow = document.getElementById('compareTotalRow');
+    totalRow.style.display = '';
+    document.getElementById('compareTotalVal').textContent = fmtRub(cmp.total_current);
+    document.getElementById('compareTotalDelta').innerHTML = deltaBadgeHtml(cmp.total_delta);
+
+    document.getElementById('monthDynamics').innerHTML = mon.months.map(m => {
+        const incD = m.income_delta !== undefined && m.income_delta !== null
+            ? `<span class="month-delta-inc"><i class="bi bi-arrow-${m.income_delta >= 0 ? 'up' : 'down'}"></i>${m.income_delta >= 0 ? '+' : ''}${m.income_delta}%</span>` : '';
+        const expD = m.expense_delta !== undefined && m.expense_delta !== null
+            ? `<span class="month-delta-exp"><i class="bi bi-arrow-${m.expense_delta >= 0 ? 'up' : 'down'}"></i>${m.expense_delta >= 0 ? '+' : ''}${m.expense_delta}%</span>` : '';
+        const deltas = (incD || expD) ? `<div class="month-delta-wrap">${incD}${expD}</div>` : '';
+        return `
+            <div class="month-stat-col">
+                <div class="month-stat-label${m.is_current ? ' fw-bold text-primary' : ''}">${m.label}</div>
+                <div class="month-stat-card${m.is_current ? ' is-current' : ''}">
+                    <div class="month-income-val"><i class="bi bi-arrow-down-circle me-1"></i>${fmtRub(m.income)}</div>
+                    <div class="month-expense-val"><i class="bi bi-arrow-up-circle me-1"></i>${fmtRub(m.expenses)}</div>
+                    <div class="month-balance-val">баланс ${m.balance >= 0 ? '+' : ''}${fmtRub(m.balance)}</div>
+                    ${deltas}
+                </div>
+            </div>`;
+    }).join('');
+
+    document.getElementById('monthTrends').innerHTML = `
+        <div class="stat-trend-row">
+            <span class="stat-trend-label"><i class="bi bi-graph-up-arrow me-2" style="color:#198754"></i>Лучший месяц по доходам</span>
+            <span class="stat-trend-val" style="color:#198754">${mon.best_income_month.label} — ${fmtRub(mon.best_income_month.amount)}</span>
+        </div>
+        <div class="stat-trend-row">
+            <span class="stat-trend-label"><i class="bi bi-graph-down-arrow me-2" style="color:#dc3545"></i>Месяц с наибольшими расходами</span>
+            <span class="stat-trend-val" style="color:#dc3545">${mon.worst_expense_month.label} — ${fmtRub(mon.worst_expense_month.amount)}</span>
+        </div>
+        <div class="stat-trend-row">
+            <span class="stat-trend-label"><i class="bi bi-piggy-bank me-2 text-primary"></i>Лучший баланс</span>
+            <span class="stat-trend-val text-primary">${mon.best_balance_month.label} — ${fmtRub(mon.best_balance_month.amount)}</span>
+        </div>`;
+}
+
+function loadStats(mode) {
+    document.getElementById('btnPrevMonth').classList.toggle('active-mode', mode === 'prev_month');
+    document.getElementById('btnPrevYear').classList.toggle('active-mode',  mode === 'prev_year');
+    fetch(`/api/stats-data?year={{ year }}&month={{ month }}&mode=${mode}`)
+        .then(r => r.json())
+        .then(renderStats);
+}
+
+document.getElementById('btnPrevMonth').addEventListener('click', () => loadStats('prev_month'));
+document.getElementById('btnPrevYear').addEventListener('click',  () => loadStats('prev_year'));
+
+loadStats('prev_month');
+</script>
+{% endblock %}

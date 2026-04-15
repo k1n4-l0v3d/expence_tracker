@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Регистрация — Трекер расходов</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/animations.css') }}" rel="stylesheet">
+    <script>
+        (function() {
+            const t = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', t);
+        })();
+    </script>
+</head>
+<body>
+
+<div class="auth-bg">
+<div style="width:100%;max-width:440px;padding:16px">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+            <div class="alert alert-{{ cat }} alert-dismissible fade show mb-3 stagger-item">
+                {{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endwith %}
+
+    <div class="auth-card p-4">
+        <div class="text-center mb-4">
+            <div class="auth-logo mx-auto">
+                <i class="bi bi-person-plus"></i>
+            </div>
+            <h5 class="fw-bold mb-0">Создать аккаунт</h5>
+            <p class="text-muted small mt-1 mb-0">Начните отслеживать расходы</p>
+        </div>
+
+        <form method="post">
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Имя пользователя</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-person"></i></span>
+                    <input type="text" name="username" class="form-control"
+                           placeholder="username" required autofocus minlength="3" maxlength="64">
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Email</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+                    <input type="email" name="email" class="form-control"
+                           placeholder="you@example.com" required>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Пароль</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                    <input type="password" name="password" class="form-control"
+                           placeholder="минимум 6 символов" required minlength="6">
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Повторите пароль</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                    <input type="password" name="confirm" class="form-control"
+                           placeholder="••••••••" required minlength="6">
+                </div>
+            </div>
+            <button type="submit" class="btn grad-primary w-100 pulse-btn">
+                <i class="bi bi-person-plus me-1"></i>Зарегистрироваться
+            </button>
+        </form>
+    </div>
+
+    <p class="text-center mt-3 text-white small">
+        Уже есть аккаунт? <a href="{{ url_for('login') }}" class="text-white fw-bold">Войти</a>
+    </p>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/animations.js') }}"></script>
+</body>
+</html>
