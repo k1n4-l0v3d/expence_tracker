@@ -815,12 +815,17 @@ def expense_add():
                 ))
             db.session.commit()
             flash('Расход добавлен!', 'success')
-            return redirect(url_for('index'))
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
         except Exception as e:
             db.session.rollback()
             flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
     return render_template('expenses/form.html', categories=categories,
-                           expense=None, today=date.today())
+                           expense=None, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
 
 
 @app.route('/expenses/<int:exp_id>/edit', methods=['GET', 'POST'])
@@ -843,12 +848,17 @@ def expense_edit(exp_id):
             exp.notes        = request.form.get('notes', '').strip() or None
             db.session.commit()
             flash('Расход обновлён!', 'success')
-            return redirect(url_for('expenses_list'))
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
         except Exception as e:
             db.session.rollback()
             flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
     return render_template('expenses/form.html', categories=categories,
-                           expense=exp, today=date.today())
+                           expense=exp, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
 
 
 @app.route('/expenses/<int:exp_id>/delete', methods=['POST'])
@@ -858,7 +868,9 @@ def expense_delete(exp_id):
     db.session.delete(exp)
     db.session.commit()
     flash('Расход удалён.', 'warning')
-    return redirect(url_for('expenses_list'))
+    ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+    ret_month = request.form.get('ret_month', type=int) or date.today().month
+    return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
 
 
 @app.context_processor
@@ -1096,11 +1108,16 @@ def income_add():
             db.session.add(inc)
             db.session.commit()
             flash('Доход добавлен!', 'success')
-            return redirect(url_for('income_list'))
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('income_list', year=ret_year, month=ret_month))
         except Exception as e:
             db.session.rollback()
             flash(f'Ошибка: {e}', 'danger')
-    return render_template('income/form.html', income=None, today=date.today())
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    return render_template('income/form.html', income=None, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
 
 
 @app.route('/income/<int:inc_id>/edit', methods=['GET', 'POST'])
@@ -1117,11 +1134,16 @@ def income_edit(inc_id):
             inc.notes       = request.form.get('notes', '').strip() or None
             db.session.commit()
             flash('Доход обновлён!', 'success')
-            return redirect(url_for('income_list'))
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('income_list', year=ret_year, month=ret_month))
         except Exception as e:
             db.session.rollback()
             flash(f'Ошибка: {e}', 'danger')
-    return render_template('income/form.html', income=inc, today=date.today())
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    return render_template('income/form.html', income=inc, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
 
 
 @app.route('/income/<int:inc_id>/delete', methods=['POST'])
@@ -1131,7 +1153,9 @@ def income_delete(inc_id):
     db.session.delete(inc)
     db.session.commit()
     flash('Доход удалён.', 'warning')
-    return redirect(url_for('income_list'))
+    ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+    ret_month = request.form.get('ret_month', type=int) or date.today().month
+    return redirect(url_for('income_list', year=ret_year, month=ret_month))
 
 
 # ─── API ──────────────────────────────────────────────────────────────────────
