@@ -52,12 +52,21 @@
                                   placeholder="Дополнительно...">{{ expense.notes or '' if expense else '' }}</textarea>
                     </div>
 
-                    <div class="form-check mb-4">
-                        <input class="form-check-input" type="checkbox" name="is_planned" id="is_planned"
-                               {% if not expense or expense.is_planned %}checked{% endif %}>
-                        <label class="form-check-label" for="is_planned">
-                            Запланированный расход
-                        </label>
+                    <div class="d-flex gap-4 mb-4 flex-wrap">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_planned" id="is_planned"
+                                   {% if not expense or expense.is_planned %}checked{% endif %}>
+                            <label class="form-check-label" for="is_planned">
+                                Запланированный расход
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_spent" id="is_spent"
+                                   {% if not expense or expense.is_spent %}checked{% endif %}>
+                            <label class="form-check-label" for="is_spent">
+                                Деньги уже потрачены
+                            </label>
+                        </div>
                     </div>
 
                     <!-- Вложения -->

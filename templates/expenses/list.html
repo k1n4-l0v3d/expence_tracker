@@ -49,10 +49,31 @@
     </div>
 </form>
 {% block scripts %}
+<style>
+.record-card.not-spent {
+    background: #fffbf0;
+    border: 1.5px dashed #f0c040;
+}
+</style>
 <script>
 function setSort(value) {
     document.getElementById('sortInput').value = value;
     document.querySelector('.filter-form').submit();
+}
+
+async function toggleSpent(expId, btn) {
+    btn.disabled = true;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    try {
+        const res = await fetch(`/expenses/${expId}/toggle-spent`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken},
+        });
+        if (!res.ok) { btn.disabled = false; return; }
+        location.reload();
+    } catch(e) {
+        btn.disabled = false;
+    }
 }
 
 function previewImage(src) {
@@ -151,7 +172,7 @@ function openAttachmentsModal(btn) {
 
 <div>
     {% for exp in expenses %}
-    <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2">
+    <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2{% if not exp.is_spent %} not-spent{% endif %}">
         <div style="min-width:0">
             <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                 <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
@@ -159,6 +180,9 @@ function openAttachmentsModal(btn) {
                 </span>
                 {% if not exp.is_planned %}
                     <span class="badge bg-warning-subtle text-warning" style="font-size:.7rem">незаплан.</span>
+                {% endif %}
+                {% if not exp.is_spent %}
+                    <span class="badge bg-warning text-dark" style="font-size:.7rem">⏳ Не потрачено</span>
                 {% endif %}
             </div>
             <div class="fw-semibold text-truncate">{{ exp.description or '—' }}</div>
@@ -177,6 +201,22 @@ function openAttachmentsModal(btn) {
                         data-attachments='{{ att_data[exp.id] | tojson }}'
                         onclick="openAttachmentsModal(this)">
                     <i class="bi bi-paperclip"></i>{{ exp.attachments|length }}
+                </button>
+                {% endif %}
+                {% if exp.is_spent %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        style="min-height:34px;padding:4px 8px;font-size:.75rem"
+                        title="Отметить как «не потрачено»"
+                        onclick="toggleSpent({{ exp.id }}, this)">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+                {% else %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-success"
+                        style="min-height:34px;padding:4px 10px;font-size:.78rem"
+                        onclick="toggleSpent({{ exp.id }}, this)">
+                    <i class="bi bi-check-lg me-1"></i>Потрачено
                 </button>
                 {% endif %}
                 <a href="{{ url_for('expense_edit', exp_id=exp.id) }}"

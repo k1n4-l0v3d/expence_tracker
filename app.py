@@ -194,6 +194,7 @@ class Expense(db.Model):
     description  = db.Column(db.String(255))
     expense_date = db.Column(db.Date, nullable=False, default=date.today)
     is_planned   = db.Column(db.Boolean, nullable=False, default=True)
+    is_spent     = db.Column(db.Boolean, nullable=False, default=True)
     notes        = db.Column(db.Text)
     created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
@@ -271,6 +272,7 @@ def get_monthly_summary(user_id: int, year: int, month: int):
             Expense,
             (Expense.category_id == Category.id)
             & (Expense.user_id == user_id)
+            & (Expense.is_spent.is_(True))
             & (extract('year',  Expense.expense_date) == year)
             & (extract('month', Expense.expense_date) == month),
         )
@@ -701,6 +703,7 @@ def expense_add():
                 description  = request.form.get('description', '').strip() or None,
                 expense_date = datetime.strptime(request.form['expense_date'], '%Y-%m-%d').date(),
                 is_planned   = request.form.get('is_planned') == 'on',
+                is_spent     = request.form.get('is_spent') == 'on',
                 notes        = request.form.get('notes', '').strip() or None,
             )
             db.session.add(exp)
@@ -748,6 +751,7 @@ def expense_edit(exp_id):
             exp.description  = request.form.get('description', '').strip() or None
             exp.expense_date = datetime.strptime(request.form['expense_date'], '%Y-%m-%d').date()
             exp.is_planned   = request.form.get('is_planned') == 'on'
+            exp.is_spent     = request.form.get('is_spent') == 'on'
             exp.notes        = request.form.get('notes', '').strip() or None
             db.session.commit()
             flash('Расход обновлён!', 'success')
@@ -767,6 +771,17 @@ def expense_delete(exp_id):
     db.session.commit()
     flash('Расход удалён.', 'warning')
     return redirect(url_for('expenses_list'))
+
+
+@app.route('/expenses/<int:exp_id>/toggle-spent', methods=['POST'])
+@login_required
+def expense_toggle_spent(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first()
+    if not exp:
+        abort(403)
+    exp.is_spent = not exp.is_spent
+    db.session.commit()
+    return jsonify({'is_spent': exp.is_spent})
 
 
 @app.route('/categories/add', methods=['POST'])
@@ -1232,6 +1247,11 @@ with app.app_context():
             conn.commit()
     except Exception as e:
         app.logger.warning("Could not drop categories_name_key constraint: %s", e)
+    exp_columns = [c['name'] for c in inspector.get_columns('expenses')]
+    if 'is_spent' not in exp_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE expenses ADD COLUMN is_spent BOOLEAN NOT NULL DEFAULT TRUE;"))
+            conn.commit()
 
 if __name__ == '__main__':
     app.run(debug=False)
