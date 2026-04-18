@@ -1,0 +1,465 @@
+/* ── Плавная смена темы ── */
+*, *::before, *::after {
+    transition:
+        background-color 0.3s ease,
+        border-color     0.3s ease,
+        color            0.2s ease,
+        box-shadow       0.3s ease;
+}
+
+.navbar-collapse,
+.collapse,
+.collapsing,
+canvas {
+    transition: none !important;
+}
+
+/* ── Плавный вход страницы ── */
+@keyframes page-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-wrapper {
+    animation: page-in 0.22s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-wrapper { animation: none; }
+}
+
+/* ── View Transitions ── */
+@keyframes vt-slide-in  { from { opacity: 0; transform: translateY(8px); } }
+@keyframes vt-slide-out { to   { opacity: 0; transform: translateY(-8px); } }
+
+::view-transition-old(root) { animation: 0.18s ease vt-slide-out both; }
+::view-transition-new(root) { animation: 0.22s ease vt-slide-in  both; }
+
+/* ── Базовые стили ── */
+body {
+    font-size: 0.92rem;
+    background-color: var(--page-bg, #fdf4ef);
+}
+
+.navbar-brand {
+    letter-spacing: .5px;
+}
+
+.card {
+    border-radius: 12px;
+    border-color: var(--border-clr, #f0d9cc);
+}
+
+.list-group-item:first-child {
+    border-top: none;
+}
+
+.table th {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--bs-secondary-color);
+}
+
+.progress {
+    border-radius: 4px;
+}
+
+/* ══════════════════════════════════════════════
+   МОБИЛЬНАЯ НИЖНЯЯ НАВИГАЦИЯ
+══════════════════════════════════════════════ */
+.bottom-nav {
+    display: none;
+}
+
+@media (max-width: 991.98px) {
+    /* Отступ снизу под нижнюю панель */
+    body {
+        padding-bottom: 72px;
+    }
+
+    .bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 1040;
+        background: var(--bs-body-bg);
+        border-top: 1px solid var(--bs-border-color);
+        box-shadow: 0 -2px 12px rgba(0,0,0,.08);
+        height: 60px;
+        align-items: stretch;
+    }
+
+    .bottom-nav a {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        font-size: .65rem;
+        color: var(--bs-secondary-color);
+        text-decoration: none;
+        padding: 6px 4px;
+        border-radius: 0;
+        transition: color 0.15s, background 0.15s;
+    }
+
+    .bottom-nav a i {
+        font-size: 1.3rem;
+        transition: none;
+    }
+
+    .bottom-nav a.active,
+    .bottom-nav a:hover {
+        color: var(--bs-primary);
+        background: var(--bs-primary-bg-subtle);
+    }
+
+    /* Скрываем десктопный navbar на мобильном */
+    .navbar .navbar-collapse {
+        display: none !important;
+    }
+
+    .navbar-toggler {
+        display: none !important;
+    }
+
+    /* Компактный navbar на мобильном: только лого + переключатель темы */
+    .navbar .navbar-brand {
+        font-size: 1rem;
+    }
+
+    .navbar-mobile-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+    }
+
+    /* Контент не обрезается */
+    .container {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    /* Карточки плотнее */
+    .card-body {
+        padding: 1rem;
+    }
+
+}
+
+@media (min-width: 992px) {
+    .navbar-mobile-right { display: none !important; }
+}
+
+/* (мобильное/десктопное переключение через Bootstrap d-none d-lg-block / d-lg-none) */
+
+/* ══════════════════════════════════════════
+   DARK MODE — BOTTOM NAV NEON
+══════════════════════════════════════════ */
+[data-bs-theme="dark"] .bottom-nav {
+    background: #080818;
+    border-top: 1px solid rgba(67, 97, 238, 0.3);
+    box-shadow: 0 -2px 20px rgba(67, 97, 238, 0.15);
+}
+
+[data-bs-theme="dark"] .bottom-nav a.active,
+[data-bs-theme="dark"] .bottom-nav a:hover {
+    color: #00ccee !important;
+    background: rgba(67, 97, 238, 0.12);
+}
+
+[data-bs-theme="dark"] .bottom-nav a.add-btn {
+    background: linear-gradient(135deg, #4361ee, #00b4d8) !important;
+    box-shadow: 0 4px 16px rgba(67, 97, 238, 0.5);
+}
+
+/* ── Карточки записей (мобильный список) ── */
+.record-card {
+    border-radius: 10px;
+    border: 1px solid var(--bs-border-color);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    background: var(--bs-body-bg);
+}
+
+.record-card:last-child {
+    margin-bottom: 0;
+}
+
+/* ── Фильтры на мобильном ── */
+@media (max-width: 575.98px) {
+    .filter-form select,
+    .filter-form input {
+        width: 100% !important;
+    }
+
+    .filter-form {
+        flex-direction: column;
+    }
+
+    /* Три карточки обзора — вертикально */
+    .summary-cards .col-md-4 {
+        margin-bottom: 0;
+    }
+}
+
+/* ── Чуть больше touch-targets ── */
+@media (max-width: 991.98px) {
+    .btn {
+        min-height: 40px;
+    }
+
+    .form-control,
+    .form-select {
+        font-size: 16px; /* предотвращает zoom на iOS */
+        min-height: 44px;
+    }
+
+    .list-group-item {
+        padding: 12px 16px;
+    }
+}
+
+/* ══════════════════════════════════════════
+   БЛОК СТАТИСТИКИ — МИНИМАЛИСТИЧНЫЙ
+══════════════════════════════════════════ */
+
+/* Акцентный цвет: кораловый в светлой, синий в тёмной */
+:root {
+    --stat-accent:        #e8736b;
+    --stat-accent-bg:     rgba(232,115,107,.08);
+    --stat-accent-shadow: rgba(232,115,107,.28);
+}
+[data-bs-theme="dark"] {
+    --stat-accent:        #4361ee;
+    --stat-accent-bg:     rgba(67,97,238,.1);
+    --stat-accent-shadow: rgba(67,97,238,.38);
+}
+
+/* Переключатель режима — liquid pill */
+.stat-mode-switch {
+    display: flex;
+    gap: 0;
+    background: var(--bs-border-color);
+    border-radius: 20px;
+    padding: 2px;
+    position: relative;
+}
+
+/* Скользящая пилюля */
+.stat-mode-switch .switch-pill {
+    position: absolute;
+    top: 2px;
+    height: calc(100% - 4px);
+    background: var(--stat-accent);
+    border-radius: 18px;
+    pointer-events: none;
+    /* left + width анимируются с разным easing → эффект жидкости */
+    transition: left   0.35s cubic-bezier(0.34, 1.5, 0.64, 1),
+                width  0.35s cubic-bezier(0.25, 1.2, 0.5,  1);
+}
+
+.stat-mode-switch button {
+    border: none;
+    background: transparent;
+    font-size: 0.7rem;
+    padding: 3px 12px;
+    border-radius: 18px;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+    white-space: nowrap;
+    position: relative; /* поверх пилюли */
+    z-index: 1;
+    transition: color 0.2s ease;
+}
+.stat-mode-switch button.on {
+    color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stat-mode-switch .switch-pill { transition: none; }
+}
+
+/* Заголовок секции */
+.stat-sec-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Строка категории */
+.cat-stat-row {
+    display: flex;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--bs-border-color);
+    gap: 10px;
+}
+.cat-stat-row:last-child { border-bottom: none; }
+.cat-stat-dot    { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.cat-stat-name   { flex: 1; font-size: 0.88rem; }
+.cat-stat-amount { font-size: 0.88rem; font-weight: 600; margin-right: 8px; }
+
+/* % бейдж */
+.delta-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    min-width: 52px;
+    text-align: center;
+    display: inline-block;
+}
+.delta-up   { background: rgba(220,53,69,.1);  color: #dc3545; }
+.delta-down { background: rgba(25,135,84,.1);  color: #198754; }
+.delta-zero { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
+.delta-new  { background: rgba(255,193,7,.1);  color: #ffc107; }
+
+[data-bs-theme="dark"] .delta-up   { background: rgba(255,107,129,.12); color: #ff6b81; }
+[data-bs-theme="dark"] .delta-down { background: rgba(0,255,184,.1);    color: #00ffb8; }
+
+/* Итоговая строка */
+.stat-total-row {
+    display: flex;
+    align-items: center;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bs-border-color);
+    gap: 10px;
+}
+.stat-total-label { flex: 1; font-size: 0.8rem; color: var(--bs-secondary-color); }
+.stat-total-amt   { font-size: 0.92rem; font-weight: 700; }
+
+/* ── Карточки месяцев ── */
+.month-pills-row { display: flex; gap: 8px; margin-top: 4px; }
+
+@keyframes pillIn {
+    from { opacity: 0; transform: translateY(22px) scale(0.93); }
+    to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+.month-pill {
+    flex: 1;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.78rem;
+    opacity: 0;
+    cursor: default;
+}
+
+/* Hover включается только после окончания анимации появления */
+.month-pill.ready {
+    transition: transform 0.22s cubic-bezier(0.34,1.3,0.64,1),
+                box-shadow  0.22s ease,
+                border-color 0.2s ease;
+}
+.month-pill[data-year].ready:hover {
+    transform: translateY(-6px) scale(1.07);
+    box-shadow: 0 12px 28px var(--stat-accent-shadow);
+    border-color: var(--stat-accent);
+}
+
+/* Иконка перехода при наведении на кликабельную карточку */
+.month-pill[data-year] .mp-name::after {
+    content: ' ↗';
+    font-size: 0.6rem;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.month-pill[data-year].ready:hover .mp-name::after {
+    opacity: 0.6;
+}
+
+.month-pill.is-current {
+    border-color: var(--stat-accent);
+    background: var(--stat-accent-bg);
+}
+[data-bs-theme="dark"] .month-pill.is-current {
+    box-shadow: 0 0 14px rgba(67,97,238,.2);
+}
+
+.month-pill .mp-name {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--bs-secondary-color);
+    margin-bottom: 5px;
+}
+.month-pill.is-current .mp-name { color: var(--stat-accent); }
+.month-pill .mp-inc   { font-size: 0.82rem; font-weight: 600; color: #198754; }
+.month-pill .mp-exp   { font-size: 0.82rem; font-weight: 600; color: #dc3545; }
+.month-pill .mp-delta { font-size: 0.68rem; color: var(--bs-secondary-color); margin-top: 4px; }
+
+[data-bs-theme="dark"] .month-pill .mp-inc { color: #00ffb8; }
+[data-bs-theme="dark"] .month-pill .mp-exp { color: #ff6b81; }
+
+/* Класс анимации появления */
+.month-pill.animating {
+    animation: pillIn 0.45s cubic-bezier(0.34,1.2,0.64,1) both;
+}
+.month-pill.animating:nth-child(1) { animation-delay: 0.05s; }
+.month-pill.animating:nth-child(2) { animation-delay: 0.17s; }
+.month-pill.animating:nth-child(3) { animation-delay: 0.29s; }
+
+/* Мобильная адаптация */
+@media (max-width: 575.98px) {
+    .month-pills-row { gap: 6px; }
+    .month-pill      { padding: 8px 8px; }
+    .month-pill .mp-inc,
+    .month-pill .mp-exp { font-size: 0.74rem; }
+    .cat-stat-amount    { min-width: 70px; }
+}
+
+/* Шеврон коллапса */
+.stat-chevron {
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+    transition: transform 0.25s ease;
+}
+.stat-chevron.is-collapsed {
+    transform: rotate(-90deg);
+}
+
+/* Коллапс — CSS grid trick (плавная высота без JS-измерений) */
+.stat-collapsible {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.28s ease-out;
+}
+.stat-collapsible.is-collapsed {
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.22s ease-in;
+}
+.stat-collapsible-inner {
+    /* overflow: visible — чтобы hover-эффект на пилюлях не обрезался.
+       Переключаем на hidden только во время схлопывания через delay-трюк. */
+    overflow: visible;
+    min-height: 0;
+    transition: overflow 0s 0.28s; /* восстанавливаем visible после окончания анимации раскрытия */
+}
+.stat-collapsible.is-collapsed .stat-collapsible-inner {
+    overflow: hidden;             /* скрываем контент при схлопывании */
+    transition: overflow 0s 0s;  /* переключаем немедленно */
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .month-pill.animating          { animation: none; opacity: 1; }
+    .month-pill.ready:hover        { transform: none; }
+    .stat-collapsible,
+    .stat-collapsible.is-collapsed { transition: none; }
+    .stat-chevron                  { transition: none; }
+}

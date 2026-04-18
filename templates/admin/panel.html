@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Администрирование{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-shield-lock-fill text-danger me-2"></i>Панель администратора
+    </h4>
+    <span class="badge bg-secondary">{{ users|length }} польз.</span>
+</div>
+
+<!-- Сводка -->
+<div class="row g-3 mb-4">
+    <div class="col-4">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-4 fw-bold text-primary">{{ users|length }}</div>
+            <div class="text-muted small">Всего</div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-4 fw-bold text-warning">
+                {{ users|selectattr('status', 'eq', 'warned')|list|length }}
+            </div>
+            <div class="text-muted small">Предупрежд.</div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="card border-0 shadow-sm text-center p-3">
+            <div class="fs-4 fw-bold text-danger">
+                {{ users|selectattr('status', 'eq', 'banned')|list|length }}
+            </div>
+            <div class="text-muted small">Заблок.</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── ДЕСКТОП: таблица ── -->
+<div class="card shadow-sm border-0 d-none d-lg-block">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th class="ps-3">#</th>
+                    <th>Пользователь</th>
+                    <th>Email</th>
+                    <th>Статус</th>
+                    <th class="text-center">Расходы</th>
+                    <th class="text-center">Доходы</th>
+                    <th>Регистрация</th>
+                    <th>Последний вход</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td class="ps-3 text-muted small">{{ user.id }}</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle bg-primary text-white d-flex align-items-center
+                                        justify-content-center flex-shrink-0"
+                                 style="width:32px;height:32px;font-size:.9rem">
+                                {{ user.username[0].upper() }}
+                            </div>
+                            <span class="fw-semibold">{{ user.username }}</span>
+                        </div>
+                    </td>
+                    <td class="text-muted small">{{ user.email }}</td>
+                    <td>{% include 'admin/_status_badge.html' %}</td>
+                    <td class="text-center small">{{ stats[user.id]['expenses'] }}</td>
+                    <td class="text-center small">{{ stats[user.id]['incomes'] }}</td>
+                    <td class="text-muted small">{{ user.created_at.strftime('%d.%m.%Y') }}</td>
+                    <td class="text-muted small">
+                        {{ user.last_seen.strftime('%d.%m %H:%M') if user.last_seen else '—' }}
+                    </td>
+                    <td class="pe-3">{% include 'admin/_actions.html' %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── МОБИЛЬНЫЙ: карточки ── -->
+<div class="d-lg-none">
+    {% for user in users %}
+    <div class="record-card">
+        <div class="d-flex align-items-center gap-3 mb-2">
+            <div class="rounded-circle bg-primary text-white d-flex align-items-center
+                        justify-content-center flex-shrink-0 fw-bold"
+                 style="width:42px;height:42px;font-size:1.1rem">
+                {{ user.username[0].upper() }}
+            </div>
+            <div style="min-width:0">
+                <div class="fw-bold text-truncate">{{ user.username }}</div>
+                <div class="text-muted small text-truncate">{{ user.email }}</div>
+            </div>
+            <div class="ms-auto flex-shrink-0">
+                {% include 'admin/_status_badge.html' %}
+            </div>
+        </div>
+        <div class="d-flex gap-3 text-muted small mb-2">
+            <span><i class="bi bi-arrow-up-circle me-1"></i>{{ stats[user.id]['expenses'] }} расх.</span>
+            <span><i class="bi bi-arrow-down-circle me-1"></i>{{ stats[user.id]['incomes'] }} дох.</span>
+            <span><i class="bi bi-calendar me-1"></i>{{ user.created_at.strftime('%d.%m.%y') }}</span>
+        </div>
+        {% if user.role != 'admin' %}
+        <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-outline-warning flex-fill"
+                    data-bs-toggle="modal" data-bs-target="#warnModal{{ user.id }}">
+                <i class="bi bi-exclamation-triangle me-1"></i>Предупреждение
+            </button>
+            {% if user.status == 'banned' %}
+            <form method="post" action="{{ url_for('admin_unban', user_id=user.id) }}" class="flex-fill">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-success w-100">
+                    <i class="bi bi-unlock me-1"></i>Разбанить
+                </button>
+            </form>
+            {% else %}
+            <button class="btn btn-sm btn-outline-danger flex-fill"
+                    data-bs-toggle="modal" data-bs-target="#banModal{{ user.id }}">
+                <i class="bi bi-slash-circle me-1"></i>Бан
+            </button>
+            {% endif %}
+            <form method="post" action="{{ url_for('admin_delete_user', user_id=user.id) }}"
+                  onsubmit="return confirm('Удалить {{ user.username }} и все его данные?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    {% endfor %}
+</div>
+
+{% endblock %}
+
+{% block modals %}
+{% for user in users %}
+    {% include 'admin/_modals.html' %}
+{% endfor %}
+{% endblock %}

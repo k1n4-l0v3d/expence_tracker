@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}{% if income %}Редактировать доход{% else %}Добавить доход{% endif %}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="d-flex align-items-center gap-3 mb-4">
+            <a href="{{ url_for('income_list') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <h4 class="mb-0 fw-bold">
+                <i class="bi bi-arrow-down-circle-fill text-success me-2"></i>
+                {% if income %}Редактировать доход{% else %}Добавить доход{% endif %}
+            </h4>
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4">
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="amount">Сумма *</label>
+                        <div class="input-group">
+                            <input type="number" name="amount" id="amount" step="0.01" min="0.01"
+                                   class="form-control form-control-lg"
+                                   value="{{ income.amount|float if income else '' }}"
+                                   placeholder="0.00" required>
+                            <span class="input-group-text">₽</span>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="source">Источник *</label>
+                        <input type="text" name="source" id="source" class="form-control"
+                               value="{{ income.source if income else '' }}"
+                               placeholder="Зарплата, фриланс, продажа…" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="income_date">Дата *</label>
+                        <input type="date" name="income_date" id="income_date" class="form-control"
+                               value="{{ income.income_date.strftime('%Y-%m-%d') if income else today.strftime('%Y-%m-%d') }}"
+                               required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="description">Описание</label>
+                        <input type="text" name="description" id="description" class="form-control"
+                               value="{{ income.description or '' if income else '' }}"
+                               placeholder="Необязательно">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold" for="notes">Заметки</label>
+                        <textarea name="notes" id="notes" class="form-control" rows="2"
+                                  placeholder="Необязательно">{{ income.notes or '' if income else '' }}</textarea>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn grad-income px-4 pulse-btn">
+                            <i class="bi bi-check-lg me-1"></i>
+                            {% if income %}Сохранить{% else %}Добавить{% endif %}
+                        </button>
+                        <a href="{{ url_for('income_list') }}" class="btn btn-outline-secondary">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}Расходы — {{ month }}/{{ year }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-list-ul text-primary me-2"></i>Расходы</h4>
+    <a href="{{ url_for('expense_add') }}" class="btn grad-primary btn-sm d-none d-lg-inline-flex pulse-btn">
+        <i class="bi bi-plus-lg me-1"></i>Добавить
+    </a>
+</div>
+
+<!-- Фильтры -->
+<form class="filter-form d-flex gap-2 flex-wrap mb-4" method="get">
+    <select name="month" class="form-select form-select-sm" style="width:140px"
+            onchange="this.form.submit()">
+        {% for m_num, m_name in months %}
+            <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+        {% endfor %}
+    </select>
+    <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+           onchange="this.form.submit()">
+    <select name="category_id" class="form-select form-select-sm" style="width:180px"
+            onchange="this.form.submit()">
+        <option value="">Все категории</option>
+        {% for cat in categories %}
+            <option value="{{ cat.id }}" {% if cat.id == selected_cat %}selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+    </select>
+    <button class="btn btn-outline-secondary btn-sm" type="submit">
+        <i class="bi bi-funnel"></i> Фильтр
+    </button>
+</form>
+
+<div>
+    {% for exp in expenses %}
+    <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2">
+        <div style="min-width:0">
+            <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
+                    <i class="bi {{ exp.category.icon }} me-1"></i>{{ exp.category.name }}
+                </span>
+                {% if not exp.is_planned %}
+                    <span class="badge bg-warning-subtle text-warning" style="font-size:.7rem">незаплан.</span>
+                {% endif %}
+            </div>
+            <div class="fw-semibold text-truncate">{{ exp.description or '—' }}</div>
+            {% if exp.notes %}
+            <div class="text-muted small fst-italic text-truncate">{{ exp.notes }}</div>
+            {% endif %}
+            <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m.%Y') }}</div>
+        </div>
+        <div class="text-end flex-shrink-0">
+            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
+            <div class="d-flex gap-1 mt-1 justify-content-end">
+                <a href="{{ url_for('expense_edit', exp_id=exp.id) }}"
+                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px">
+                    <i class="bi bi-pencil"></i>
+                </a>
+                <form method="post" action="{{ url_for('expense_delete', exp_id=exp.id) }}"
+                      class="d-inline" onsubmit="return confirm('Удалить расход?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-inbox" aria-hidden="true" style="font-size:2.5rem;opacity:.3"></i>
+        <div class="mt-2">Расходов не найдено</div>
+        <a href="{{ url_for('expense_add') }}" class="btn grad-primary btn-sm mt-3">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Добавить первый расход
+        </a>
+    </div>
+    {% endfor %}
+
+    {% if expenses %}
+    <div class="d-flex justify-content-between align-items-center px-2 pt-2 border-top mt-2">
+        <span class="fw-bold text-muted small">Итого</span>
+        <span class="fw-bold">{{ "%.2f"|format(expenses|sum(attribute='amount')|float) }} ₽</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
