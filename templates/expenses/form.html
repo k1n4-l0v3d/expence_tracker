@@ -76,16 +76,16 @@
 
 {% block modals %}
 <!-- Модал создания категории -->
-<div class="modal fade" id="newCategoryModal" tabindex="-1">
+<div class="modal fade" id="newCategoryModal" tabindex="-1" aria-labelledby="newCategoryModalLabel">
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header border-0 pb-0">
-        <h6 class="modal-title fw-semibold">✨ Новая категория</h6>
+        <h6 class="modal-title fw-semibold" id="newCategoryModalLabel">✨ Новая категория</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          <label class="form-label fw-semibold">Название <span class="text-danger">*</span></label>
+          <label class="form-label fw-semibold" for="newCatName">Название <span class="text-danger">*</span></label>
           <input type="text" id="newCatName" class="form-control" maxlength="100" placeholder="напр. Спорт, Хобби...">
           <div id="newCatError" class="text-danger small mt-1 d-none"></div>
         </div>
@@ -103,7 +103,7 @@
       </div>
       <div class="modal-footer border-0 pt-0">
         <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
-        <button type="button" class="btn btn-sm grad-primary" onclick="createCategory()">Создать</button>
+        <button type="button" id="createCatBtn" class="btn btn-sm grad-primary" onclick="createCategory()">Создать</button>
       </div>
     </div>
   </div>
@@ -116,24 +116,39 @@ document.getElementById('category_id').addEventListener('change', function() {
   if (this.value === '__new__') {
     this.value = '';
     new bootstrap.Modal(document.getElementById('newCategoryModal')).show();
-    setTimeout(() => document.getElementById('newCatName').focus(), 300);
   }
 });
 
+document.getElementById('newCategoryModal').addEventListener('shown.bs.modal', function () {
+  document.getElementById('newCatName').focus();
+});
+
+document.getElementById('newCategoryModal').addEventListener('hidden.bs.modal', function () {
+  document.getElementById('newCatName').value = '';
+  const errEl = document.getElementById('newCatError');
+  errEl.classList.add('d-none');
+  errEl.textContent = '';
+  // Reset color to default
+  document.querySelectorAll('#newCategoryModal .color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  const defaultSwatch = document.querySelector('#newCategoryModal .color-swatch[data-color="#3498db"]');
+  if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
+  document.getElementById('newCatColor').value = '#3498db';
+});
+
 function selectColor(el) {
-  document.querySelectorAll('.color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  document.querySelectorAll('#newCategoryModal .color-swatch').forEach(s => s.style.border = '3px solid transparent');
   el.style.border = '3px solid white';
   document.getElementById('newCatColor').value = el.dataset.color;
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  const defaultSwatch = document.querySelector('.color-swatch[data-color="#3498db"]');
+  const defaultSwatch = document.querySelector('#newCategoryModal .color-swatch[data-color="#3498db"]');
   if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
 });
 
-const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-
 async function createCategory() {
+  const btn = document.getElementById('createCatBtn');
+  btn.disabled = true;
   const name  = document.getElementById('newCatName').value.trim();
   const color = document.getElementById('newCatColor').value;
   const errEl = document.getElementById('newCatError');
@@ -142,10 +157,12 @@ async function createCategory() {
   if (!name) {
     errEl.textContent = 'Введите название';
     errEl.classList.remove('d-none');
+    btn.disabled = false;
     return;
   }
 
   try {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     const res = await fetch('/categories/add', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
@@ -164,12 +181,12 @@ async function createCategory() {
     const newOpt = select.querySelector('option[value="__new__"]');
     select.insertBefore(option, newOpt);
 
-    const modal = bootstrap.Modal.getInstance(document.getElementById('newCategoryModal'));
-    modal.hide();
-    document.getElementById('newCatName').value = '';
+    bootstrap.Modal.getInstance(document.getElementById('newCategoryModal')).hide();
   } catch (e) {
     errEl.textContent = 'Ошибка сети';
     errEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
   }
 }
 </script>
