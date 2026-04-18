@@ -11,6 +11,7 @@ from sqlalchemy import extract, func
 from functools import wraps
 import os
 import random
+import re
 import threading
 
 
@@ -152,7 +153,7 @@ class Category(db.Model):
 
     expenses = db.relationship('Expense',       backref='category', lazy=True)
     budgets  = db.relationship('MonthlyBudget', backref='category', lazy=True)
-    user     = db.relationship('User', backref=db.backref('custom_categories', lazy=True))
+    user     = db.relationship('User', backref=db.backref('custom_categories', lazy='dynamic'))
 
 
 class MonthlyBudget(db.Model):
@@ -722,6 +723,8 @@ def category_add():
         return jsonify({'error': 'Invalid JSON'}), 400
     name  = (data.get('name') or '').strip()
     color = data.get('color', '#6c757d')
+    if color and not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
 
     if not name:
         return jsonify({'error': 'Название обязательно'}), 400
@@ -737,9 +740,13 @@ def category_add():
         return jsonify({'error': f'Категория «{existing.name}» уже существует'}), 409
 
     cat = Category(name=name, color=color, user_id=current_user.id)
-    db.session.add(cat)
-    db.session.commit()
-    return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color}), 201
+    try:
+        db.session.add(cat)
+        db.session.commit()
+        return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
 
 
 @app.route('/budget', methods=['GET', 'POST'])
@@ -926,7 +933,10 @@ def stats_data():
                 & (extract('year',  Expense.expense_date) == y)
                 & (extract('month', Expense.expense_date) == m),
             )
-            .filter(Category.is_active.is_(True))
+            .filter(
+                Category.is_active.is_(True),
+                db.or_(Category.user_id.is_(None), Category.user_id == uid)
+            )
             .group_by(Category.id, Category.name, Category.color, Category.icon)
             .all()
         )
@@ -1072,8 +1082,8 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_name_key;"))
             conn.commit()
-    except Exception:
-        pass  # SQLite не поддерживает DROP CONSTRAINT
+    except Exception as e:
+        app.logger.warning("Could not drop categories_name_key constraint: %s", e)
 
 if __name__ == '__main__':
     app.run(debug=False)
