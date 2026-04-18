@@ -674,8 +674,13 @@ def expenses_list():
         db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
     ).order_by(Category.name).all()
 
+    att_data = {
+        exp.id: [{'id': a.id, 'mime': a.mime_type, 'fname': a.filename} for a in exp.attachments]
+        for exp in expenses if exp.attachments
+    }
+
     return render_template('expenses/list.html',
-        expenses=expenses, categories=categories,
+        expenses=expenses, categories=categories, att_data=att_data,
         year=year, month=month, months=months_list(), selected_cat=cat_id, sort=sort)
 
 

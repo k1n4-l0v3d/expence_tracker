@@ -55,13 +55,23 @@ function setSort(value) {
     document.querySelector('.filter-form').submit();
 }
 
-document.getElementById('attachmentsModal').addEventListener('show.bs.modal', function(e) {
-    const btn = e.relatedTarget;
+function previewImage(src) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px';
+    ov.appendChild(img);
+    ov.onclick = () => ov.remove();
+    document.body.appendChild(ov);
+}
+
+function openAttachmentsModal(btn) {
     const desc = btn.dataset.expDesc;
     const atts = JSON.parse(btn.dataset.attachments);
     const n = atts.length;
     const word = n === 1 ? 'файл' : n < 5 ? 'файла' : 'файлов';
-    document.getElementById('attachmentsModalTitle').textContent = `«${desc}» · ${n} ${word}`;
+    document.getElementById('attachmentsModalTitle').textContent = `Прикреплённые файлы · ${n} ${word}`;
 
     const body = document.getElementById('attachmentsModalBody');
     body.innerHTML = '';
@@ -71,10 +81,9 @@ document.getElementById('attachmentsModal').addEventListener('show.bs.modal', fu
     atts.forEach(att => {
         const item = document.createElement('div');
         if (att.mime.startsWith('image/')) {
-            item.innerHTML = `<a href="/attachments/${att.id}" target="_blank" rel="noopener">
-                <img src="/attachments/${att.id}"
-                     style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:pointer">
-            </a>`;
+            item.innerHTML = `<img src="/attachments/${att.id}"
+                     style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:zoom-in"
+                     onclick="previewImage('/attachments/${att.id}')">`;
         } else {
             const safe = att.fname.replace(/</g, '&lt;').replace(/>/g, '&gt;');
             item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
@@ -88,7 +97,12 @@ document.getElementById('attachmentsModal').addEventListener('show.bs.modal', fu
     });
 
     body.appendChild(grid);
-});
+    const modalEl = document.getElementById('attachmentsModal');
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
 </script>
 {% endblock %}
 
@@ -125,16 +139,17 @@ document.getElementById('attachmentsModal').addEventListener('show.bs.modal', fu
             <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m.%Y') }}</div>
         </div>
         <div class="text-end flex-shrink-0">
-            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽
-                {% if exp.attachments %}
-                <button type="button" class="btn btn-link btn-sm p-0 ms-1 text-primary"
-                        data-bs-toggle="modal" data-bs-target="#attachmentsModal"
-                        data-exp-desc="{{ exp.description or '—' }}"
-                        data-attachments="{{ [{'id': a.id, 'mime': a.mime_type, 'fname': a.filename} for a in exp.attachments] | tojson | e }}"
-                        style="font-size:.85rem;vertical-align:middle">📎{{ exp.attachments|length }}</button>
-                {% endif %}
-            </div>
+            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
             <div class="d-flex gap-1 mt-1 justify-content-end">
+                {% if exp.attachments %}
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        style="min-height:34px;padding:4px 8px"
+                        data-exp-desc="{{ (exp.description or '—') | e }}"
+                        data-attachments='{{ att_data[exp.id] | tojson }}'
+                        onclick="openAttachmentsModal(this)">
+                    <i class="bi bi-paperclip"></i>{{ exp.attachments|length }}
+                </button>
+                {% endif %}
                 <a href="{{ url_for('expense_edit', exp_id=exp.id) }}"
                    class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px">
                     <i class="bi bi-pencil"></i>
