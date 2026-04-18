@@ -138,6 +138,26 @@
         <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
         <button type="button" id="createCatBtn" class="btn btn-sm grad-primary" onclick="createCategory()">Создать</button>
       </div>
+      {% set user_cats = categories | selectattr('user_id') | list %}
+      {% if user_cats %}
+      <div class="px-3 pb-3">
+        <hr class="mt-0 mb-2">
+        <div class="fw-semibold small text-muted mb-2">Мои категории</div>
+        <div id="userCatList">
+          {% for cat in user_cats %}
+          <div class="d-flex align-items-center justify-content-between py-1 gap-2" id="cat-row-{{ cat.id }}">
+            <span class="d-flex align-items-center gap-2 text-truncate">
+              <span style="width:10px;height:10px;border-radius:50%;background:{{ cat.color }};flex-shrink:0"></span>
+              <span class="small text-truncate">{{ cat.name }}</span>
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0"
+                    style="font-size:.7rem"
+                    onclick="deleteCategoryRow({{ cat.id }}, this)">✕</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -256,6 +276,31 @@ document.addEventListener('DOMContentLoaded', function() {
   const defaultSwatch = document.querySelector('#newCategoryModal .color-swatch[data-color="#3498db"]');
   if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
 });
+
+async function deleteCategoryRow(catId, btn) {
+  btn.disabled = true;
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  try {
+    const res = await fetch(`/categories/${catId}`, {
+      method: 'DELETE',
+      headers: {'X-CSRFToken': csrfToken},
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Ошибка удаления');
+      btn.disabled = false;
+      return;
+    }
+    // Убираем строку из списка
+    document.getElementById(`cat-row-${catId}`)?.remove();
+    // Убираем опцию из дропдауна
+    const select = document.getElementById('category_id');
+    select.querySelector(`option[value="${catId}"]`)?.remove();
+  } catch(e) {
+    alert('Ошибка сети');
+    btn.disabled = false;
+  }
+}
 
 async function createCategory() {
   const btn = document.getElementById('createCatBtn');

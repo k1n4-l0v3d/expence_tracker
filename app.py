@@ -804,6 +804,22 @@ def category_add():
         return jsonify({'error': 'Ошибка сервера'}), 500
 
 
+@app.route('/categories/<int:cat_id>', methods=['DELETE'])
+@login_required
+def category_delete(cat_id):
+    cat = Category.query.filter_by(id=cat_id, user_id=current_user.id).first_or_404()
+    in_use = Expense.query.filter_by(category_id=cat_id).count()
+    if in_use:
+        return jsonify({'error': f'Категория используется в {in_use} расход(ах)'}), 409
+    try:
+        db.session.delete(cat)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
 # ─── Attachments ──────────────────────────────────────────────────────────────
 
 ALLOWED_MIME_TYPES  = {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}
