@@ -49,7 +49,7 @@
                 {% if current_user.is_authenticated %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}"
-                       href="{{ url_for('index') }}">
+                       href="{{ url_for('index', year=nav_year, month=nav_month) }}">
                         <i class="bi bi-house me-1"></i>Обзор
                     </a>
                 </li>
@@ -67,7 +67,7 @@
                 </li>
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'budget' %}active{% endif %}"
-                       href="{{ url_for('budget') }}">
+                       href="{{ url_for('budget', year=nav_year, month=nav_month) }}">
                         <i class="bi bi-piggy-bank me-1"></i>Бюджет
                     </a>
                 </li>
@@ -144,7 +144,7 @@
 ════════════════════════════════════════════ -->
 {% if current_user.is_authenticated %}
 <nav class="bottom-nav">
-    <a href="{{ url_for('index') }}"
+    <a href="{{ url_for('index', year=nav_year, month=nav_month) }}"
        class="{% if request.endpoint == 'index' %}active{% endif %}">
         <i class="bi bi-house"></i>
         <span>Обзор</span>
