@@ -22,6 +22,7 @@
                                     {{ cat.name }}
                                 </option>
                             {% endfor %}
+                            <option value="__new__" style="color: var(--bs-primary);">✨ + Создать новую категорию...</option>
                         </select>
                     </div>
 
@@ -71,4 +72,105 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block modals %}
+<!-- Модал создания категории -->
+<div class="modal fade" id="newCategoryModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h6 class="modal-title fw-semibold">✨ Новая категория</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Название <span class="text-danger">*</span></label>
+          <input type="text" id="newCatName" class="form-control" maxlength="100" placeholder="напр. Спорт, Хобби...">
+          <div id="newCatError" class="text-danger small mt-1 d-none"></div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Цвет</label>
+          <div class="d-flex gap-2 flex-wrap">
+            {% for color_hex in ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#3498db','#9b59b6','#1abc9c','#95a5a6'] %}
+            <div class="color-swatch" data-color="{{ color_hex }}"
+                 style="width:28px;height:28px;border-radius:50%;background:{{ color_hex }};cursor:pointer;border:3px solid transparent"
+                 onclick="selectColor(this)"></div>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="newCatColor" value="#3498db">
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-sm grad-primary" onclick="createCategory()">Создать</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('category_id').addEventListener('change', function() {
+  if (this.value === '__new__') {
+    this.value = '';
+    new bootstrap.Modal(document.getElementById('newCategoryModal')).show();
+    setTimeout(() => document.getElementById('newCatName').focus(), 300);
+  }
+});
+
+function selectColor(el) {
+  document.querySelectorAll('.color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  el.style.border = '3px solid white';
+  document.getElementById('newCatColor').value = el.dataset.color;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const defaultSwatch = document.querySelector('.color-swatch[data-color="#3498db"]');
+  if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
+});
+
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+async function createCategory() {
+  const name  = document.getElementById('newCatName').value.trim();
+  const color = document.getElementById('newCatColor').value;
+  const errEl = document.getElementById('newCatError');
+  errEl.classList.add('d-none');
+
+  if (!name) {
+    errEl.textContent = 'Введите название';
+    errEl.classList.remove('d-none');
+    return;
+  }
+
+  try {
+    const res = await fetch('/categories/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+      body: JSON.stringify({name, color})
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Ошибка';
+      errEl.classList.remove('d-none');
+      return;
+    }
+
+    const select = document.getElementById('category_id');
+    const option = new Option(data.name, data.id, true, true);
+    const newOpt = select.querySelector('option[value="__new__"]');
+    select.insertBefore(option, newOpt);
+
+    const modal = bootstrap.Modal.getInstance(document.getElementById('newCategoryModal'));
+    modal.hide();
+    document.getElementById('newCatName').value = '';
+  } catch (e) {
+    errEl.textContent = 'Ошибка сети';
+    errEl.classList.remove('d-none');
+  }
+}
+</script>
 {% endblock %}
