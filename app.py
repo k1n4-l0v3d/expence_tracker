@@ -823,8 +823,10 @@ def expense_add():
             flash(f'Ошибка: {e}', 'danger')
     ret_year  = request.args.get('ret_year',  type=int) or date.today().year
     ret_month = request.args.get('ret_month', type=int) or date.today().month
+    default_day = min(date.today().day, calendar.monthrange(ret_year, ret_month)[1])
+    default_date = date(ret_year, ret_month, default_day)
     return render_template('expenses/form.html', categories=categories,
-                           expense=None, today=date.today(),
+                           expense=None, today=default_date,
                            ret_year=ret_year, ret_month=ret_month)
 
 
@@ -871,6 +873,14 @@ def expense_delete(exp_id):
     ret_year  = request.form.get('ret_year',  type=int) or date.today().year
     ret_month = request.form.get('ret_month', type=int) or date.today().month
     return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
+
+
+@app.context_processor
+def inject_nav_month():
+    today = date.today()
+    nav_year  = request.args.get('year',  type=int) or today.year
+    nav_month = request.args.get('month', type=int) or today.month
+    return {'nav_year': nav_year, 'nav_month': nav_month}
 
 
 @app.context_processor
@@ -1116,7 +1126,9 @@ def income_add():
             flash(f'Ошибка: {e}', 'danger')
     ret_year  = request.args.get('ret_year',  type=int) or date.today().year
     ret_month = request.args.get('ret_month', type=int) or date.today().month
-    return render_template('income/form.html', income=None, today=date.today(),
+    default_day = min(date.today().day, calendar.monthrange(ret_year, ret_month)[1])
+    default_date = date(ret_year, ret_month, default_day)
+    return render_template('income/form.html', income=None, today=default_date,
                            ret_year=ret_year, ret_month=ret_month)
 
 

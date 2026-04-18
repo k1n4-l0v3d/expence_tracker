@@ -55,13 +55,13 @@
                 </li>
                 <li class="nav-item">
                     <a class="nav-link {% if 'expenses' in request.endpoint %}active{% endif %}"
-                       href="{{ url_for('expenses_list') }}">
+                       href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}">
                         <i class="bi bi-list-ul me-1"></i>Расходы
                     </a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link {% if 'income' in request.endpoint %}active{% endif %}"
-                       href="{{ url_for('income_list') }}">
+                       href="{{ url_for('income_list', year=nav_year, month=nav_month) }}">
                         <i class="bi bi-arrow-down-circle me-1"></i>Доходы
                     </a>
                 </li>
@@ -74,7 +74,7 @@
                 <li class="nav-item ms-2">
                     <a class="nav-link btn btn-sm px-3 text-white pulse-btn"
                        style="background:rgba(255,255,255,.2);border-radius:10px"
-                       href="{{ url_for('expense_add') }}">
+                       href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
                         <i class="bi bi-plus-lg me-1"></i>Добавить
                     </a>
                 </li>
@@ -149,15 +149,15 @@
         <i class="bi bi-house"></i>
         <span>Обзор</span>
     </a>
-    <a href="{{ url_for('expenses_list') }}"
+    <a href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}"
        class="{% if 'expenses' in request.endpoint %}active{% endif %}">
         <i class="bi bi-list-ul"></i>
         <span>Расходы</span>
     </a>
-    <a href="{{ url_for('expense_add') }}" class="add-btn">
+    <a href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}" class="add-btn">
         <i class="bi bi-plus-lg"></i>
     </a>
-    <a href="{{ url_for('income_list') }}"
+    <a href="{{ url_for('income_list', year=nav_year, month=nav_month) }}"
        class="{% if 'income' in request.endpoint %}active{% endif %}">
         <i class="bi bi-arrow-down-circle"></i>
         <span>Доходы</span>
