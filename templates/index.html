@@ -101,12 +101,18 @@
              id="dailyBudgetCard"
              role="button" tabindex="0"
              aria-label="Настроить даты выплат"
-             style="cursor:pointer">
+             style="cursor:pointer"
+             {% if daily_info %}
+             data-nearest-date="{{ daily_info.nearest_date.isoformat() }}"
+             data-balance="{{ balance }}"
+             data-payment-type="{{ daily_info.payment_type }}"
+             {% endif %}>
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <div class="small opacity-75">Можно тратить в день</div>
                     {% if daily_info %}
                         <div class="fs-3 fw-bold count-up"
+                             id="dailyAmount"
                              data-value="{{ daily_info.daily }}"
                              data-decimals="2"
                              data-suffix=" ₽"
@@ -120,7 +126,7 @@
                 <i class="bi bi-calendar-check" style="font-size:2.5rem;opacity:.35"></i>
             </div>
             <div class="card-footer pb-2">
-                <span class="small text-white-50">
+                <span class="small text-white-50" id="dailyFooter">
                     {% if daily_info %}
                         до {{ daily_info.payment_type }} {{ daily_info.days_left }} дн.
                     {% else %}
@@ -320,6 +326,40 @@
 
 {% block scripts %}
 <script>
+// Пересчёт "можно тратить в день" по клиентской дате/таймзоне
+(function() {
+    const card = document.getElementById('dailyBudgetCard');
+    if (!card || !card.dataset.nearestDate) return;
+
+    const [y, m, d] = card.dataset.nearestDate.split('-').map(Number);
+    const nearest = new Date(y, m - 1, d); // локальная полночь
+    const today   = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const daysLeft  = Math.max(Math.ceil((nearest - today) / 86400000), 1);
+    const balance   = parseFloat(card.dataset.balance);
+    const daily     = balance / daysLeft;
+    const payType   = card.dataset.paymentType;
+
+    const amountEl = document.getElementById('dailyAmount');
+    const footerEl = document.getElementById('dailyFooter');
+
+    if (amountEl) {
+        amountEl.dataset.value = daily.toFixed(2);
+        amountEl.textContent   = daily.toFixed(2) + ' ₽';
+        if (daily < 0) {
+            amountEl.style.color      = '#ff6b6b';
+            amountEl.style.textShadow = '0 0 12px rgba(255,80,80,.5)';
+        } else {
+            amountEl.style.color      = '';
+            amountEl.style.textShadow = '';
+        }
+    }
+    if (footerEl) {
+        footerEl.textContent = `до ${payType} ${daysLeft} дн.`;
+    }
+})();
+
 const NEON_COLORS = [
     '#4361ee', '#00b4d8', '#7209b7', '#00ffb8',
     '#ee66ff', '#4cc9f0', '#f72585', '#4895ef',
