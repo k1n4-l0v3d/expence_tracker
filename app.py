@@ -142,15 +142,17 @@ class Category(db.Model):
     __tablename__ = 'categories'
 
     id          = db.Column(db.Integer, primary_key=True)
-    name        = db.Column(db.String(100), nullable=False, unique=True)
+    name        = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     color       = db.Column(db.String(7), nullable=False, default='#6c757d')
     icon        = db.Column(db.String(50), default='bi-wallet2')
     is_active   = db.Column(db.Boolean, nullable=False, default=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
     expenses = db.relationship('Expense',       backref='category', lazy=True)
     budgets  = db.relationship('MonthlyBudget', backref='category', lazy=True)
+    user     = db.relationship('User', backref=db.backref('custom_categories', lazy=True))
 
 
 class MonthlyBudget(db.Model):
@@ -252,7 +254,10 @@ def get_monthly_summary(user_id: int, year: int, month: int):
             & (extract('year',  Expense.expense_date) == year)
             & (extract('month', Expense.expense_date) == month),
         )
-        .filter(Category.is_active.is_(True))
+        .filter(
+            Category.is_active.is_(True),
+            db.or_(Category.user_id.is_(None), Category.user_id == user_id)
+        )
         .group_by(Category.id, Category.name, Category.color, Category.icon)
         .order_by(func.coalesce(func.sum(Expense.amount), 0).desc())
         .all()
@@ -631,7 +636,10 @@ def expenses_list():
         query = query.filter(Expense.category_id == cat_id)
 
     expenses   = query.order_by(Expense.expense_date.desc(), Expense.created_at.desc()).all()
-    categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
 
     return render_template('expenses/list.html',
         expenses=expenses, categories=categories,
@@ -642,7 +650,10 @@ def expenses_list():
 @login_required
 @ban_check
 def expense_add():
-    categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
     if request.method == 'POST':
         try:
             exp = Expense(
@@ -670,7 +681,10 @@ def expense_add():
 @ban_check
 def expense_edit(exp_id):
     exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first_or_404()
-    categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
     if request.method == 'POST':
         try:
             exp.category_id  = int(request.form['category_id'])
@@ -699,6 +713,35 @@ def expense_delete(exp_id):
     return redirect(url_for('expenses_list'))
 
 
+@app.route('/categories/add', methods=['POST'])
+@login_required
+@ban_check
+def category_add():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    name  = (data.get('name') or '').strip()
+    color = data.get('color', '#6c757d')
+
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+
+    # Проверка: нет ли уже такой категории (системной или своей)
+    existing = Category.query.filter(
+        db.func.lower(Category.name) == name.lower(),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).first()
+    if existing:
+        return jsonify({'error': f'Категория «{existing.name}» уже существует'}), 409
+
+    cat = Category(name=name, color=color, user_id=current_user.id)
+    db.session.add(cat)
+    db.session.commit()
+    return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color}), 201
+
+
 @app.route('/budget', methods=['GET', 'POST'])
 @login_required
 @ban_check
@@ -707,7 +750,10 @@ def budget():
     year       = int(request.args.get('year',  today.year))
     month      = int(request.args.get('month', today.month))
     uid        = current_user.id
-    categories = Category.query.filter_by(is_active=True).order_by(Category.name).all()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
     budget_map = get_budget_map(uid, year, month)
 
     if request.method == 'POST':
@@ -1015,6 +1061,19 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN advance_day INTEGER NULL;"))
             conn.commit()
+    # Миграция categories: добавить user_id
+    cat_columns = [c['name'] for c in inspector.get_columns('categories')]
+    if 'user_id' not in cat_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE categories ADD COLUMN user_id INTEGER NULL REFERENCES users(id);"))
+            conn.commit()
+    # Снять старый unique constraint на name
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_name_key;"))
+            conn.commit()
+    except Exception:
+        pass  # SQLite не поддерживает DROP CONSTRAINT
 
 if __name__ == '__main__':
     app.run(debug=False)
