@@ -13,6 +13,7 @@ from functools import wraps
 import os
 import io
 import random
+import calendar
 import re
 import threading
 
@@ -294,6 +295,10 @@ def get_budget_map(user_id: int, year: int, month: int) -> dict:
 
 def months_list():
     return [(m, datetime(2000, m, 1).strftime('%B')) for m in range(1, 13)]
+
+
+def adjust_day(day: int, year: int, month: int) -> int:
+    return min(day, calendar.monthrange(year, month)[1])
 
 
 def _last_day_of_month(d: date) -> date:
@@ -629,6 +634,23 @@ def index():
         .limit(5).all()
     )
 
+    prev_month = month - 1 if month > 1 else 12
+    prev_year  = year if month > 1 else year - 1
+
+    current_empty = (total_spent == 0 and total_income == 0)
+    prev_has_expenses = Expense.query.filter_by(
+        user_id=uid, is_planned=True
+    ).filter(
+        extract('year',  Expense.expense_date) == prev_year,
+        extract('month', Expense.expense_date) == prev_month,
+    ).count() > 0
+    prev_has_income = Income.query.filter(
+        Income.user_id == uid,
+        extract('year',  Income.income_date) == prev_year,
+        extract('month', Income.income_date) == prev_month,
+    ).count() > 0
+    can_copy = current_empty and (prev_has_expenses or prev_has_income)
+
     return render_template('index.html',
         summary=summary, budget_map=budget_map,
         total_spent=total_spent, total_income=total_income, balance=balance,
@@ -636,7 +658,67 @@ def index():
         daily_info=daily_info,
         salary_day=current_user.salary_day,
         advance_day=current_user.advance_day,
+        can_copy=can_copy,
     )
+
+
+@app.route('/copy-from-previous', methods=['POST'])
+@login_required
+@ban_check
+def copy_from_previous():
+    year  = int(request.form['year'])
+    month = int(request.form['month'])
+    uid   = current_user.id
+
+    prev_month = month - 1 if month > 1 else 12
+    prev_year  = year if month > 1 else year - 1
+
+    src_expenses = Expense.query.filter_by(
+        user_id=uid, is_planned=True
+    ).filter(
+        extract('year',  Expense.expense_date) == prev_year,
+        extract('month', Expense.expense_date) == prev_month,
+    ).all()
+
+    src_incomes = Income.query.filter(
+        Income.user_id == uid,
+        extract('year',  Income.income_date) == prev_year,
+        extract('month', Income.income_date) == prev_month,
+    ).all()
+
+    month_names = {m: name for m, name in months_list()}
+
+    for exp in src_expenses:
+        new_day = adjust_day(exp.expense_date.day, year, month)
+        db.session.add(Expense(
+            user_id      = uid,
+            category_id  = exp.category_id,
+            amount       = exp.amount,
+            description  = exp.description,
+            notes        = exp.notes,
+            expense_date = date(year, month, new_day),
+            is_planned   = True,
+            is_spent     = False,
+        ))
+
+    for inc in src_incomes:
+        new_day = adjust_day(inc.income_date.day, year, month)
+        db.session.add(Income(
+            user_id     = uid,
+            source      = inc.source,
+            amount      = inc.amount,
+            description = inc.description,
+            notes       = inc.notes,
+            income_date = date(year, month, new_day),
+        ))
+
+    db.session.commit()
+    flash(
+        f'Скопировано {len(src_expenses)} расходов и {len(src_incomes)} доходов '
+        f'из {month_names[prev_month]}.',
+        'success'
+    )
+    return redirect(url_for('index', year=year, month=month))
 
 
 @app.route('/expenses')

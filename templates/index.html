@@ -8,17 +8,29 @@
         <i class="bi bi-bar-chart-line-fill text-primary me-2"></i>
         Обзор расходов
     </h4>
-    <form class="d-flex gap-2 align-items-center" method="get">
-        <select name="month" class="form-select form-select-sm" style="width:140px"
-                onchange="this.form.submit()">
-            {% for m_num, m_name in months %}
-                <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
-            {% endfor %}
-        </select>
-        <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
-               onchange="this.form.submit()">
-        <button class="btn grad-primary btn-sm" type="submit" title="Применить фильтр"><i class="bi bi-funnel"></i></button>
-    </form>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <form class="d-flex gap-2 align-items-center" method="get">
+            <select name="month" class="form-select form-select-sm" style="width:140px"
+                    onchange="this.form.submit()">
+                {% for m_num, m_name in months %}
+                    <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+                {% endfor %}
+            </select>
+            <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+                   onchange="this.form.submit()">
+            <button class="btn grad-primary btn-sm" type="submit" title="Применить фильтр"><i class="bi bi-funnel"></i></button>
+        </form>
+        {% if can_copy %}
+        <form method="post" action="{{ url_for('copy_from_previous') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="year"  value="{{ year }}">
+            <input type="hidden" name="month" value="{{ month }}">
+            <button type="submit" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-copy me-1"></i>Скопировать
+            </button>
+        </form>
+        {% endif %}
+    </div>
 </div>
 
 <!-- Итоговые карточки -->
