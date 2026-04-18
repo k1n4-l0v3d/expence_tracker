@@ -636,7 +636,20 @@ def expenses_list():
     if cat_id:
         query = query.filter(Expense.category_id == cat_id)
 
-    expenses   = query.order_by(Expense.expense_date.desc(), Expense.created_at.desc()).all()
+    sort = request.args.get('sort', 'date_desc')
+    if sort == 'date_asc':
+        query = query.order_by(Expense.expense_date.asc(), Expense.created_at.asc())
+    elif sort == 'amount_desc':
+        query = query.order_by(Expense.amount.desc())
+    elif sort == 'amount_asc':
+        query = query.order_by(Expense.amount.asc())
+    elif sort == 'category_asc':
+        query = query.join(Category).order_by(Category.name.asc())
+    else:
+        sort = 'date_desc'
+        query = query.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+
+    expenses   = query.all()
     categories = Category.query.filter(
         Category.is_active.is_(True),
         db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
@@ -644,7 +657,7 @@ def expenses_list():
 
     return render_template('expenses/list.html',
         expenses=expenses, categories=categories,
-        year=year, month=month, months=months_list(), selected_cat=cat_id)
+        year=year, month=month, months=months_list(), selected_cat=cat_id, sort=sort)
 
 
 @app.route('/expenses/add', methods=['GET', 'POST'])
