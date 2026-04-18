@@ -225,5 +225,30 @@
         });
     }
 </script>
+
+{% if reminders %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  {% for exp in reminders %}
+  <div class="toast" id="reminder-toast-{{ exp.id }}" role="alert" data-bs-autohide="false">
+    <div class="toast-header">
+      <strong class="me-auto">⏰ Завтра расход</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Закрыть"></button>
+    </div>
+    <div class="toast-body">
+      {{ exp.description or exp.category.name }} — <strong>{{ "%.0f"|format(exp.amount|float) }} ₽</strong>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<script>
+document.querySelectorAll('.toast[id^="reminder-toast-"]').forEach(function(el) {
+    var key = 'shown_' + el.id;
+    if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        new bootstrap.Toast(el).show();
+    }
+});
+</script>
+{% endif %}
 </body>
 </html>

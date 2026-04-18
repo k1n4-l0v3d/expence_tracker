@@ -773,6 +773,17 @@ def expense_delete(exp_id):
     return redirect(url_for('expenses_list'))
 
 
+@app.context_processor
+def inject_reminders():
+    if not current_user.is_authenticated:
+        return {'reminders': []}
+    tomorrow = date.today() + timedelta(days=1)
+    reminders = Expense.query.filter_by(
+        user_id=current_user.id, is_spent=False
+    ).filter(Expense.expense_date == tomorrow).all()
+    return {'reminders': reminders}
+
+
 @app.route('/expenses/<int:exp_id>/toggle-spent', methods=['POST'])
 @login_required
 def expense_toggle_spent(exp_id):
