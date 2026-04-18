@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, send_file
 from urllib.parse import urlparse, urljoin
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (LoginManager, UserMixin, login_user, logout_user,
@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import extract, func
 from functools import wraps
 import os
+import io
 import random
 import re
 import threading
@@ -196,6 +197,23 @@ class Expense(db.Model):
     created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                              onupdate=datetime.utcnow)
+
+    attachments  = db.relationship('ExpenseAttachment', backref='expense',
+                                   lazy=True, cascade='all, delete-orphan')
+
+
+class ExpenseAttachment(db.Model):
+    __tablename__ = 'expense_attachments'
+
+    id         = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer,
+                           db.ForeignKey('expenses.id', ondelete='CASCADE'),
+                           nullable=False)
+    filename   = db.Column(db.String(255), nullable=False)
+    mime_type  = db.Column(db.String(100), nullable=False)
+    data       = db.Column(db.LargeBinary, nullable=False)
+    size       = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 # ─── Декораторы ───────────────────────────────────────────────────────────────
