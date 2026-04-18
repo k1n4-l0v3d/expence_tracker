@@ -26,6 +26,12 @@
             <option value="{{ cat.id }}" {% if cat.id == selected_cat %}selected{% endif %}>{{ cat.name }}</option>
         {% endfor %}
     </select>
+    <select name="spent" class="form-select form-select-sm" style="width:160px"
+            onchange="this.form.submit()">
+        <option value="all"    {% if spent_filter == 'all'    %}selected{% endif %}>Все расходы</option>
+        <option value="spent"  {% if spent_filter == 'spent'  %}selected{% endif %}>✅ Потраченные</option>
+        <option value="unspent"{% if spent_filter == 'unspent'%}selected{% endif %}>⏳ Не потраченные</option>
+    </select>
     <input type="hidden" name="sort" id="sortInput" value="{{ sort }}">
     <div class="dropdown">
         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">

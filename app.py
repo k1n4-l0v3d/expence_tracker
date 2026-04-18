@@ -646,8 +646,9 @@ def expenses_list():
     today  = date.today()
     year   = int(request.args.get('year',  today.year))
     month  = int(request.args.get('month', today.month))
-    cat_id = request.args.get('category_id', type=int)
-    uid    = current_user.id
+    cat_id       = request.args.get('category_id', type=int)
+    spent_filter = request.args.get('spent', 'all')
+    uid          = current_user.id
 
     query = Expense.query.filter(
         Expense.user_id == uid,
@@ -656,6 +657,10 @@ def expenses_list():
     )
     if cat_id:
         query = query.filter(Expense.category_id == cat_id)
+    if spent_filter == 'spent':
+        query = query.filter(Expense.is_spent.is_(True))
+    elif spent_filter == 'unspent':
+        query = query.filter(Expense.is_spent.is_(False))
 
     sort = request.args.get('sort', 'date_desc')
     if sort == 'date_asc':
@@ -683,7 +688,8 @@ def expenses_list():
 
     return render_template('expenses/list.html',
         expenses=expenses, categories=categories, att_data=att_data,
-        year=year, month=month, months=months_list(), selected_cat=cat_id, sort=sort)
+        year=year, month=month, months=months_list(), selected_cat=cat_id, sort=sort,
+        spent_filter=spent_filter)
 
 
 @app.route('/expenses/add', methods=['GET', 'POST'])
