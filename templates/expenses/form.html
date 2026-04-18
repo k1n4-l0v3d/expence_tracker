@@ -10,7 +10,7 @@
                 {% if expense %}Редактировать расход{% else %}Добавить расход{% endif %}
             </div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label fw-semibold" for="category_id">Категория <span class="text-danger">*</span></label>
@@ -58,6 +58,39 @@
                         <label class="form-check-label" for="is_planned">
                             Запланированный расход
                         </label>
+                    </div>
+
+                    <!-- Вложения -->
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Вложения</label>
+                        <div id="attachmentGrid" class="d-flex flex-wrap gap-2 mb-2">
+                            {% if expense %}
+                            {% for att in expense.attachments %}
+                            <div class="attachment-thumb position-relative" data-att-id="{{ att.id }}">
+                                {% if att.mime_type.startswith('image/') %}
+                                <img src="{{ url_for('attachment_serve', att_id=att.id) }}"
+                                     style="width:60px;height:60px;object-fit:cover;border-radius:6px">
+                                {% else %}
+                                <div class="d-flex align-items-center justify-content-center bg-body-secondary"
+                                     style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">📄</div>
+                                {% endif %}
+                                <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 rounded-circle p-0"
+                                        style="width:18px;height:18px;font-size:.65rem;line-height:1"
+                                        onclick="deleteAttachment({{ att.id }}, this.closest('.attachment-thumb'))">✕</button>
+                            </div>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                        <label for="attachmentInput"
+                               class="d-inline-flex align-items-center gap-2 text-secondary"
+                               style="cursor:pointer;border:2px dashed currentColor;border-radius:8px;padding:.5rem .75rem">
+                            <i class="bi bi-paperclip"></i>
+                            <span>Прикрепить фото или PDF</span>
+                        </label>
+                        <input type="file" name="attachments" id="attachmentInput" multiple
+                               accept="image/jpeg,image/png,image/webp,application/pdf"
+                               class="d-none"{% if expense %} onchange="uploadFiles(this)"{% endif %}>
+                        <div id="attachmentError" class="text-danger small mt-1 d-none"></div>
                     </div>
 
                     <div class="d-flex gap-2">
@@ -112,6 +145,84 @@
 
 {% block scripts %}
 <script>
+{% if expense %}
+// Edit mode: AJAX upload + delete
+async function uploadFiles(input) {
+  const errEl = document.getElementById('attachmentError');
+  errEl.classList.add('d-none');
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  for (const file of Array.from(input.files)) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/expenses/{{ expense.id }}/attachments', {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Ошибка загрузки';
+        errEl.classList.remove('d-none');
+      } else {
+        appendThumb(data);
+      }
+    } catch(e) {
+      errEl.textContent = 'Ошибка сети';
+      errEl.classList.remove('d-none');
+    }
+  }
+  input.value = '';
+}
+
+function appendThumb(att) {
+  const grid = document.getElementById('attachmentGrid');
+  const thumb = document.createElement('div');
+  thumb.className = 'attachment-thumb position-relative';
+  thumb.dataset.attId = att.id;
+  const inner = att.mime_type.startsWith('image/')
+    ? `<img src="/attachments/${att.id}" style="width:60px;height:60px;object-fit:cover;border-radius:6px">`
+    : `<div class="d-flex align-items-center justify-content-center bg-body-secondary" style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">📄</div>`;
+  thumb.innerHTML = inner + `<button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 rounded-circle p-0"
+    style="width:18px;height:18px;font-size:.65rem;line-height:1"
+    onclick="deleteAttachment(${att.id}, this.closest('.attachment-thumb'))">✕</button>`;
+  grid.appendChild(thumb);
+}
+
+async function deleteAttachment(attId, thumbEl) {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  try {
+    const res = await fetch(`/attachments/${attId}`, {
+      method: 'DELETE',
+      headers: {'X-CSRFToken': csrfToken},
+    });
+    if (res.ok) thumbEl.remove();
+  } catch(e) {}
+}
+{% else %}
+// Add mode: show local previews before submit
+document.getElementById('attachmentInput').addEventListener('change', function() {
+  const grid = document.getElementById('attachmentGrid');
+  grid.querySelectorAll('.local-preview').forEach(el => el.remove());
+  Array.from(this.files).forEach(file => {
+    const thumb = document.createElement('div');
+    thumb.className = 'local-preview';
+    thumb.style.cssText = 'width:60px;height:60px;border-radius:6px;overflow:hidden;flex-shrink:0';
+    if (file.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      const reader = new FileReader();
+      reader.onload = e => { img.src = e.target.result; };
+      reader.readAsDataURL(file);
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = '<div class="d-flex align-items-center justify-content-center bg-body-secondary h-100 w-100" style="font-size:1.8rem">📄</div>';
+    }
+    grid.appendChild(thumb);
+  });
+});
+{% endif %}
+
 document.getElementById('category_id').addEventListener('change', function() {
   if (this.value === '__new__') {
     this.value = '';

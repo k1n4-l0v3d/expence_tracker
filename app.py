@@ -8,6 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import extract, func
+from sqlalchemy.orm import joinedload
 from functools import wraps
 import os
 import io
@@ -667,7 +668,7 @@ def expenses_list():
         sort = 'date_desc'
         query = query.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
 
-    expenses   = query.all()
+    expenses   = query.options(joinedload(Expense.attachments)).all()
     categories = Category.query.filter(
         Category.is_active.is_(True),
         db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)

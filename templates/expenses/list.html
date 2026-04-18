@@ -54,7 +54,56 @@ function setSort(value) {
     document.getElementById('sortInput').value = value;
     document.querySelector('.filter-form').submit();
 }
+
+document.getElementById('attachmentsModal').addEventListener('show.bs.modal', function(e) {
+    const btn = e.relatedTarget;
+    const desc = btn.dataset.expDesc;
+    const atts = JSON.parse(btn.dataset.attachments);
+    const n = atts.length;
+    const word = n === 1 ? 'файл' : n < 5 ? 'файла' : 'файлов';
+    document.getElementById('attachmentsModalTitle').textContent = `«${desc}» · ${n} ${word}`;
+
+    const body = document.getElementById('attachmentsModalBody');
+    body.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'd-flex flex-wrap gap-3';
+
+    atts.forEach(att => {
+        const item = document.createElement('div');
+        if (att.mime.startsWith('image/')) {
+            item.innerHTML = `<a href="/attachments/${att.id}" target="_blank" rel="noopener">
+                <img src="/attachments/${att.id}"
+                     style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:pointer">
+            </a>`;
+        } else {
+            const safe = att.fname.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
+                <div style="font-size:2.5rem">📄</div>
+                <small class="text-muted text-center"
+                       style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">↓ Скачать</a>
+            </div>`;
+        }
+        grid.appendChild(item);
+    });
+
+    body.appendChild(grid);
+});
 </script>
+{% endblock %}
+
+{% block modals %}
+<div class="modal fade" id="attachmentsModal" tabindex="-1" aria-labelledby="attachmentsModalTitle">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold" id="attachmentsModalTitle">Вложения</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="attachmentsModalBody"></div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 <div>
@@ -76,7 +125,15 @@ function setSort(value) {
             <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m.%Y') }}</div>
         </div>
         <div class="text-end flex-shrink-0">
-            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
+            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽
+                {% if exp.attachments %}
+                <button type="button" class="btn btn-link btn-sm p-0 ms-1 text-primary"
+                        data-bs-toggle="modal" data-bs-target="#attachmentsModal"
+                        data-exp-desc="{{ exp.description or '—' }}"
+                        data-attachments="{{ [{'id': a.id, 'mime': a.mime_type, 'fname': a.filename} for a in exp.attachments] | tojson | e }}"
+                        style="font-size:.85rem;vertical-align:middle">📎{{ exp.attachments|length }}</button>
+                {% endif %}
+            </div>
             <div class="d-flex gap-1 mt-1 justify-content-end">
                 <a href="{{ url_for('expense_edit', exp_id=exp.id) }}"
                    class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px">
