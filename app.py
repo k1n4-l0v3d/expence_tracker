@@ -698,6 +698,24 @@ def expense_add():
                 notes        = request.form.get('notes', '').strip() or None,
             )
             db.session.add(exp)
+            db.session.flush()
+            files = request.files.getlist('attachments')
+            for f in files:
+                if not f or not f.filename:
+                    continue
+                mime = f.mimetype or ''
+                if mime not in ALLOWED_MIME_TYPES:
+                    continue
+                data = f.read()
+                if len(data) > MAX_ATTACHMENT_SIZE:
+                    continue
+                db.session.add(ExpenseAttachment(
+                    expense_id=exp.id,
+                    filename=f.filename,
+                    mime_type=mime,
+                    data=data,
+                    size=len(data),
+                ))
             db.session.commit()
             flash('Расход добавлен!', 'success')
             return redirect(url_for('index'))
