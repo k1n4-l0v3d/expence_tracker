@@ -31,3 +31,9 @@ ExpenseTracker.app/
 
 # Claude
 .claude/
+
+# Git worktrees
+.worktrees/
+
+# Brainstorm companion
+.superpowers/
