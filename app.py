@@ -780,6 +780,83 @@ def category_add():
         return jsonify({'error': 'Ошибка сервера'}), 500
 
 
+# ─── Attachments ──────────────────────────────────────────────────────────────
+
+ALLOWED_MIME_TYPES  = {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}
+MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_ATTACHMENTS     = 10
+
+
+@app.route('/attachments/<int:att_id>')
+@login_required
+def attachment_serve(att_id):
+    att = ExpenseAttachment.query.get_or_404(att_id)
+    if att.expense.user_id != current_user.id:
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    return send_file(
+        io.BytesIO(att.data),
+        mimetype=att.mime_type,
+        download_name=att.filename,
+        as_attachment=False,
+        max_age=3600,
+    )
+
+
+@app.route('/expenses/<int:exp_id>/attachments', methods=['POST'])
+@login_required
+@ban_check
+def attachment_upload(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first()
+    if exp is None:
+        return jsonify({'error': 'Расход не найден'}), 403
+
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'Файл не передан'}), 400
+
+    mime = f.mimetype or ''
+    if mime not in ALLOWED_MIME_TYPES:
+        return jsonify({'error': 'Недопустимый тип файла'}), 415
+
+    data = f.read()
+    if len(data) > MAX_ATTACHMENT_SIZE:
+        return jsonify({'error': 'Файл слишком большой (макс. 10 МБ)'}), 413
+
+    if ExpenseAttachment.query.filter_by(expense_id=exp_id).count() >= MAX_ATTACHMENTS:
+        return jsonify({'error': 'Максимум 10 вложений на расход'}), 409
+
+    att = ExpenseAttachment(
+        expense_id=exp_id,
+        filename=f.filename or 'file',
+        mime_type=mime,
+        data=data,
+        size=len(data),
+    )
+    try:
+        db.session.add(att)
+        db.session.commit()
+        return jsonify({'id': att.id, 'filename': att.filename,
+                        'mime_type': att.mime_type, 'size': att.size}), 201
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+@app.route('/attachments/<int:att_id>', methods=['DELETE'])
+@login_required
+def attachment_delete(att_id):
+    att = ExpenseAttachment.query.get_or_404(att_id)
+    if att.expense.user_id != current_user.id:
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    try:
+        db.session.delete(att)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка удаления'}), 500
+
+
 @app.route('/budget', methods=['GET', 'POST'])
 @login_required
 @ban_check
