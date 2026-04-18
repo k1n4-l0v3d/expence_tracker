@@ -74,24 +74,28 @@
         <!-- Статистика -->
         <div class="row g-3 mb-4">
             <div class="col-sm-6">
-                <div class="card shadow-sm border-0 text-center p-3 hover-lift">
-                    <div class="fs-2 fw-bold text-danger count-up"
-                         data-value="{{ total_expenses }}"
-                         data-decimals="2"
-                         data-suffix=" ₽">{{ "%.0f"|format(total_expenses) }} ₽</div>
-                    <div class="text-muted small">Всего расходов</div>
-                    <div class="text-muted small">{{ expense_count }} операций</div>
-                </div>
+                <a href="{{ url_for('expenses_list') }}" class="text-decoration-none">
+                    <div class="card shadow-sm border-0 text-center p-3 hover-lift" style="cursor:pointer">
+                        <div class="fs-2 fw-bold text-danger count-up"
+                             data-value="{{ total_expenses }}"
+                             data-decimals="2"
+                             data-suffix=" ₽">{{ "%.0f"|format(total_expenses) }} ₽</div>
+                        <div class="text-muted small">Всего расходов</div>
+                        <div class="text-muted small">{{ expense_count }} операций</div>
+                    </div>
+                </a>
             </div>
             <div class="col-sm-6">
-                <div class="card shadow-sm border-0 text-center p-3 hover-lift">
-                    <div class="fs-2 fw-bold text-success count-up"
-                         data-value="{{ total_income }}"
-                         data-decimals="2"
-                         data-suffix=" ₽">{{ "%.0f"|format(total_income) }} ₽</div>
-                    <div class="text-muted small">Всего доходов</div>
-                    <div class="text-muted small">{{ income_count }} операций</div>
-                </div>
+                <a href="{{ url_for('income_list') }}" class="text-decoration-none">
+                    <div class="card shadow-sm border-0 text-center p-3 hover-lift" style="cursor:pointer">
+                        <div class="fs-2 fw-bold text-success count-up"
+                             data-value="{{ total_income }}"
+                             data-decimals="2"
+                             data-suffix=" ₽">{{ "%.0f"|format(total_income) }} ₽</div>
+                        <div class="text-muted small">Всего доходов</div>
+                        <div class="text-muted small">{{ income_count }} операций</div>
+                    </div>
+                </a>
             </div>
         </div>
 
