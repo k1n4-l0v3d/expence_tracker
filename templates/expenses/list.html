@@ -62,6 +62,35 @@
 }
 </style>
 <script>
+function openExpenseDetail(el) {
+    const exp = JSON.parse(el.dataset.exp);
+
+    document.getElementById('edCategoryBadge').textContent = exp.category;
+    document.getElementById('edCategoryBadge').style.background = exp.color;
+
+    document.getElementById('edDescription').textContent = exp.description || '—';
+
+    const notesEl = document.getElementById('edNotes');
+    notesEl.textContent = exp.notes || '';
+    notesEl.style.display = exp.notes ? '' : 'none';
+
+    document.getElementById('edAmount').textContent = exp.amount + ' ₽';
+    document.getElementById('edDate').textContent = exp.date;
+
+    const badgesEl = document.getElementById('edBadges');
+    badgesEl.innerHTML = '';
+    if (!exp.is_planned) {
+        badgesEl.innerHTML += '<span class="badge bg-warning-subtle text-warning border border-warning">незапланированный</span>';
+    }
+    if (!exp.is_spent) {
+        badgesEl.innerHTML += '<span class="badge bg-warning text-dark">⏳ Не потрачено</span>';
+    } else {
+        badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success">✅ Потрачено</span>';
+    }
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('expenseDetailModal')).show();
+}
+
 function setSort(value) {
     document.getElementById('sortInput').value = value;
     document.querySelector('.filter-form').submit();
@@ -163,6 +192,35 @@ function openAttachmentsModal(btn) {
 {% endblock %}
 
 {% block modals %}
+<!-- Модал деталей расхода -->
+<div class="modal fade" id="expenseDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <span id="edCategoryBadge" class="badge rounded-pill fs-6"></span>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="mb-3">
+                    <div id="edDescription" class="fw-bold fs-5"></div>
+                    <div id="edNotes" class="text-muted small fst-italic mt-1"></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <div>
+                        <div class="text-muted small">Сумма</div>
+                        <div id="edAmount" class="fw-bold fs-4"></div>
+                    </div>
+                    <div class="text-end">
+                        <div class="text-muted small">Дата</div>
+                        <div id="edDate" class="fw-semibold"></div>
+                    </div>
+                </div>
+                <div id="edBadges" class="d-flex gap-2 flex-wrap mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="attachmentsModal" tabindex="-1" aria-labelledby="attachmentsModalTitle">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
@@ -179,7 +237,19 @@ function openAttachmentsModal(btn) {
 <div>
     {% for exp in expenses %}
     <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2{% if not exp.is_spent %} not-spent{% endif %}">
-        <div style="min-width:0">
+        <div style="min-width:0;cursor:pointer;flex:1"
+             onclick="openExpenseDetail(this)"
+             data-exp='{
+                "category": "{{ exp.category.name | e }}",
+                "icon": "{{ exp.category.icon }}",
+                "color": "{{ exp.category.color }}",
+                "description": {{ (exp.description or '') | tojson }},
+                "notes": {{ (exp.notes or '') | tojson }},
+                "amount": "{{ '%.2f'|format(exp.amount|float) }}",
+                "date": "{{ exp.expense_date.strftime('%d.%m.%Y') }}",
+                "is_planned": {{ exp.is_planned | tojson }},
+                "is_spent": {{ exp.is_spent | tojson }}
+             }'>
             <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                 <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
                     <i class="bi {{ exp.category.icon }} me-1"></i>{{ exp.category.name }}
