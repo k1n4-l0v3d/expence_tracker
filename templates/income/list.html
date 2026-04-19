@@ -1,6 +1,65 @@
 {% extends 'base.html' %}
 {% block title %}Доходы — {{ month }}/{{ year }}{% endblock %}
 
+{% block modals %}
+<div class="modal fade" id="incomeDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <span class="badge rounded-pill bg-success fs-6">
+                    <i class="bi bi-arrow-down-circle me-1"></i>Доход
+                </span>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="mb-3">
+                    <div id="idSource" class="fw-bold fs-5"></div>
+                    <div id="idDescription" class="text-muted small mt-1"></div>
+                    <div id="idNotes" class="text-muted small fst-italic mt-1"></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <div>
+                        <div class="text-muted small">Сумма</div>
+                        <div id="idAmount" class="fw-bold fs-4 text-success"></div>
+                    </div>
+                    <div class="text-end">
+                        <div class="text-muted small">Дата</div>
+                        <div id="idDate" class="fw-semibold"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openIncomeDetail(el) {
+    const inc = JSON.parse(el.dataset.inc);
+
+    document.getElementById('idSource').textContent = inc.source;
+
+    const descEl = document.getElementById('idDescription');
+    descEl.textContent = inc.description || '';
+    descEl.style.display = inc.description ? '' : 'none';
+
+    const notesEl = document.getElementById('idNotes');
+    notesEl.textContent = inc.notes || '';
+    notesEl.style.display = inc.notes ? '' : 'none';
+
+    document.getElementById('idAmount').textContent = '+' + inc.amount + ' ₽';
+    document.getElementById('idDate').textContent = inc.date;
+
+    const modalEl = document.getElementById('incomeDetailModal');
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+</script>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
     <h4 class="mb-0 fw-bold">
@@ -40,7 +99,15 @@
 <div>
     {% for inc in incomes %}
     <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2">
-        <div style="min-width:0">
+        <div style="min-width:0;cursor:pointer;flex:1"
+             onclick="openIncomeDetail(this)"
+             data-inc='{
+                "source": {{ inc.source | tojson }},
+                "description": {{ (inc.description or "") | tojson }},
+                "notes": {{ (inc.notes or "") | tojson }},
+                "amount": "{{ "%.2f"|format(inc.amount|float) }}",
+                "date": "{{ inc.income_date.strftime("%d.%m.%Y") }}"
+             }'>
             <div class="fw-semibold text-truncate">
                 <i class="bi bi-arrow-down-circle text-success me-1"></i>{{ inc.source }}
             </div>
