@@ -181,6 +181,8 @@ function previewImage(src) {
 
 let _attachmentsModalInstance = null;
 let _attachmentsSourceBtn = null;
+let _attachmentsExpId = null;
+let _attachmentsGrid = null;
 
 function updateAttachmentsTitle(count) {
     const word = count === 1 ? 'файл' : count < 5 ? 'файла' : 'файлов';
@@ -197,7 +199,7 @@ async function deleteAttachmentFromModal(attId, itemEl) {
     if (!res.ok) return;
     itemEl.remove();
 
-    const remaining = document.querySelectorAll('#attachmentsModalBody [data-att-id]').length;
+    const remaining = _attachmentsGrid ? _attachmentsGrid.querySelectorAll('[data-att-id]').length : 0;
     if (remaining === 0) {
         if (_attachmentsModalInstance) _attachmentsModalInstance.hide();
     } else {
@@ -218,7 +220,7 @@ function openAttachmentsModal(btn) {
     const body = document.getElementById('attachmentsModalBody');
     body.innerHTML = '';
     const grid = document.createElement('div');
-    grid.className = 'd-flex flex-wrap gap-3';
+    grid.className = 'd-flex flex-wrap gap-3 att-grid';
 
     atts.forEach(att => {
         const item = document.createElement('div');
@@ -255,20 +257,93 @@ function openAttachmentsModal(btn) {
     });
 
     body.appendChild(grid);
+    _attachmentsGrid = grid;
     const modalEl = document.getElementById('attachmentsModal');
     if (modalEl.parentElement !== document.body) {
         document.body.appendChild(modalEl);
     }
     _attachmentsSourceBtn = btn;
+    _attachmentsExpId = btn.dataset.expId || btn.getAttribute('data-exp-id');
     _attachmentsModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
     modalEl.addEventListener('hidden.bs.modal', function onHidden() {
         modalEl.removeEventListener('hidden.bs.modal', onHidden);
-        if (_attachmentsSourceBtn && document.querySelectorAll('#attachmentsModalBody [data-att-id]').length === 0) {
+        if (_attachmentsSourceBtn && _attachmentsGrid && _attachmentsGrid.querySelectorAll('[data-att-id]').length === 0) {
             _attachmentsSourceBtn.remove();
             _attachmentsSourceBtn = null;
         }
     });
     _attachmentsModalInstance.show();
+}
+
+async function handleAttachmentUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!_attachmentsExpId) { alert('Не удалось определить ID расхода'); return; }
+    input.value = '';
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const fd = new FormData();
+        fd.append('file', file);
+
+        const res = await fetch(`/expenses/${_attachmentsExpId}/attachments`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken},
+            body: fd,
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || 'Ошибка загрузки');
+            return;
+        }
+
+        const att = await res.json();
+
+        const grid = _attachmentsGrid;
+        if (!grid) { alert('Ошибка: grid не найден'); return; }
+
+        const item = document.createElement('div');
+        item.dataset.attId = att.id;
+        item.style.cssText = 'position:relative';
+
+        if (att.mime_type && att.mime_type.startsWith('image/')) {
+            item.innerHTML = `<img src="/attachments/${att.id}"
+                style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:zoom-in"
+                onclick="previewImage('/attachments/${att.id}')">`;
+        } else {
+            const safe = att.filename.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
+                <div style="font-size:2.5rem"><i class="bi bi-file-earmark-text"></i></div>
+                <small class="text-muted text-center"
+                       style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i>Скачать
+                </a>
+            </div>`;
+        }
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn btn-danger position-absolute top-0 end-0 rounded-circle p-0';
+        delBtn.style.cssText = 'width:22px;height:22px;min-width:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box';
+        delBtn.setAttribute('aria-label', 'Удалить вложение');
+        delBtn.innerHTML = '<i class="bi bi-x" aria-hidden="true"></i>';
+        delBtn.onclick = () => deleteAttachmentFromModal(att.id, item);
+        item.appendChild(delBtn);
+        grid.appendChild(item);
+
+        const count = _attachmentsGrid.querySelectorAll('[data-att-id]').length;
+        updateAttachmentsTitle(count);
+        if (_attachmentsSourceBtn) {
+            _attachmentsSourceBtn.innerHTML = `<i class="bi bi-paperclip"></i>${count}`;
+            const atts = JSON.parse(_attachmentsSourceBtn.dataset.attachments);
+            atts.push({id: att.id, mime: att.mime_type, fname: att.filename});
+            _attachmentsSourceBtn.dataset.attachments = JSON.stringify(atts);
+        }
+    } catch(e) {
+        alert('Ошибка: ' + e.message);
+    }
 }
 </script>
 {% endblock %}
@@ -328,6 +403,13 @@ function openAttachmentsModal(btn) {
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body" id="attachmentsModalBody"></div>
+            <div class="modal-footer border-0 pt-0">
+                <label class="btn btn-outline-primary btn-sm mb-0" id="attachmentAddBtn" style="cursor:pointer">
+                    <i class="bi bi-plus-lg me-1"></i>Добавить файл
+                    <input type="file" class="d-none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                           onchange="handleAttachmentUpload(this)">
+                </label>
+            </div>
         </div>
     </div>
 </div>
@@ -375,6 +457,7 @@ function openAttachmentsModal(btn) {
                 {% if exp.attachments %}
                 <button type="button" class="btn btn-sm btn-outline-primary"
                         style="min-height:34px;padding:4px 8px"
+                        data-exp-id="{{ exp.id }}"
                         data-exp-desc="{{ (exp.description or '—') | e }}"
                         data-attachments='{{ att_data[exp.id] | tojson }}'
                         onclick="openAttachmentsModal(this)">
