@@ -162,10 +162,10 @@
         <i class="bi bi-arrow-down-circle"></i>
         <span>Доходы</span>
     </a>
-    <a href="{{ url_for('profile') }}"
-       class="{% if request.endpoint == 'profile' %}active{% endif %}">
-        <i class="bi bi-person-circle"></i>
-        <span>Кабинет</span>
+    <a href="{{ url_for('budget', year=nav_year, month=nav_month) }}"
+       class="{% if request.endpoint == 'budget' %}active{% endif %}">
+        <i class="bi bi-piggy-bank"></i>
+        <span>Бюджет</span>
     </a>
 </nav>
 {% endif %}
@@ -229,9 +229,9 @@
 {% if reminders %}
 <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1100">
   {% for exp in reminders %}
-  <div class="toast" id="reminder-toast-{{ exp.id }}" role="alert" data-bs-autohide="false">
+  <div class="toast" id="reminder-toast-{{ exp.id }}" role="alert" data-bs-autohide="true" data-bs-delay="8000">
     <div class="toast-header">
-      <strong class="me-auto">⏰ Завтра расход</strong>
+      <strong class="me-auto"><i class="bi bi-bell me-1"></i>Завтра расход</strong>
       <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Закрыть"></button>
     </div>
     <div class="toast-body">

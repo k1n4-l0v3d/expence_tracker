@@ -2,6 +2,23 @@
 {% block title %}Доходы — {{ month }}/{{ year }}{% endblock %}
 
 {% block modals %}
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="confirmIncomeDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить доход?</div>
+                <div class="text-muted small mt-1">Это действие нельзя отменить</div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4" id="confirmIncomeDeleteBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="incomeDetailModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -35,6 +52,25 @@
 
 {% block scripts %}
 <script>
+let _pendingIncomeDeleteForm = null;
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.income-delete-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            _pendingIncomeDeleteForm = this;
+            const modalEl = document.getElementById('confirmIncomeDeleteModal');
+            if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    });
+    document.getElementById('confirmIncomeDeleteBtn').addEventListener('click', function() {
+        if (_pendingIncomeDeleteForm) {
+            bootstrap.Modal.getInstance(document.getElementById('confirmIncomeDeleteModal')).hide();
+            _pendingIncomeDeleteForm.submit();
+        }
+    });
+});
+
 function openIncomeDetail(el) {
     const inc = JSON.parse(el.dataset.inc);
 
@@ -100,7 +136,10 @@ function openIncomeDetail(el) {
     {% for inc in incomes %}
     <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2">
         <div style="min-width:0;cursor:pointer;flex:1"
+             role="button"
+             tabindex="0"
              onclick="openIncomeDetail(this)"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openIncomeDetail(this)}"
              data-inc='{
                 "source": {{ inc.source | tojson }},
                 "description": {{ (inc.description or "") | tojson }},
@@ -121,16 +160,18 @@ function openIncomeDetail(el) {
             <div class="fw-bold fs-6 text-success">+{{ "%.2f"|format(inc.amount|float) }} ₽</div>
             <div class="d-flex gap-1 mt-1 justify-content-end">
                 <a href="{{ url_for('income_edit', inc_id=inc.id, ret_year=year, ret_month=month) }}"
-                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px">
-                    <i class="bi bi-pencil"></i>
+                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px"
+                   aria-label="Редактировать доход">
+                    <i class="bi bi-pencil" aria-hidden="true"></i>
                 </a>
                 <form method="post" action="{{ url_for('income_delete', inc_id=inc.id) }}"
-                      class="d-inline" onsubmit="return confirm('Удалить доход?')">
+                      class="d-inline income-delete-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="ret_year"  value="{{ year }}">
                     <input type="hidden" name="ret_month" value="{{ month }}">
-                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px">
-                        <i class="bi bi-trash"></i>
+                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px"
+                            aria-label="Удалить доход">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
                     </button>
                 </form>
             </div>

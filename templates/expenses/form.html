@@ -83,11 +83,16 @@
                                      style="width:60px;height:60px;object-fit:cover;border-radius:6px">
                                 {% else %}
                                 <div class="d-flex align-items-center justify-content-center bg-body-secondary"
-                                     style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">📄</div>
+                                     style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                </div>
                                 {% endif %}
                                 <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 rounded-circle p-0"
-                                        style="width:18px;height:18px;font-size:.65rem;line-height:1"
-                                        onclick="deleteAttachment({{ att.id }}, this.closest('.attachment-thumb'))">✕</button>
+                                        style="width:24px;height:24px;font-size:.8rem;line-height:1"
+                                        aria-label="Удалить вложение"
+                                        onclick="deleteAttachment({{ att.id }}, this.closest('.attachment-thumb'))">
+                                    <i class="bi bi-x" aria-hidden="true"></i>
+                                </button>
                             </div>
                             {% endfor %}
                             {% endif %}
@@ -124,7 +129,7 @@
   <div class="modal-dialog modal-sm">
     <div class="modal-content">
       <div class="modal-header border-0 pb-0">
-        <h6 class="modal-title fw-semibold" id="newCategoryModalLabel">✨ Новая категория</h6>
+        <h6 class="modal-title fw-semibold" id="newCategoryModalLabel"><i class="bi bi-stars me-1"></i>Новая категория</h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -213,10 +218,11 @@ function appendThumb(att) {
   thumb.dataset.attId = att.id;
   const inner = att.mime_type.startsWith('image/')
     ? `<img src="/attachments/${att.id}" style="width:60px;height:60px;object-fit:cover;border-radius:6px">`
-    : `<div class="d-flex align-items-center justify-content-center bg-body-secondary" style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">📄</div>`;
+    : `<div class="d-flex align-items-center justify-content-center bg-body-secondary" style="width:60px;height:60px;border-radius:6px;font-size:1.8rem"><i class="bi bi-file-earmark-text"></i></div>`;
   thumb.innerHTML = inner + `<button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 rounded-circle p-0"
-    style="width:18px;height:18px;font-size:.65rem;line-height:1"
-    onclick="deleteAttachment(${att.id}, this.closest('.attachment-thumb'))">✕</button>`;
+    style="width:24px;height:24px;font-size:.8rem;line-height:1"
+    aria-label="Удалить вложение"
+    onclick="deleteAttachment(${att.id}, this.closest('.attachment-thumb'))"><i class="bi bi-x" aria-hidden="true"></i></button>`;
   grid.appendChild(thumb);
 }
 
@@ -247,12 +253,21 @@ document.getElementById('attachmentInput').addEventListener('change', function()
       reader.readAsDataURL(file);
       thumb.appendChild(img);
     } else {
-      thumb.innerHTML = '<div class="d-flex align-items-center justify-content-center bg-body-secondary h-100 w-100" style="font-size:1.8rem">📄</div>';
+      thumb.innerHTML = '<div class="d-flex align-items-center justify-content-center bg-body-secondary h-100 w-100" style="font-size:1.8rem"><i class="bi bi-file-earmark-text"></i></div>';
     }
     grid.appendChild(thumb);
   });
 });
 {% endif %}
+
+// Loading state при отправке формы
+document.querySelector('form[method="post"]').addEventListener('submit', function() {
+    const btn = this.querySelector('[type="submit"]');
+    if (btn && !btn.disabled) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Сохранение...';
+    }
+});
 
 document.getElementById('category_id').addEventListener('change', function() {
   if (this.value === '__new__') {

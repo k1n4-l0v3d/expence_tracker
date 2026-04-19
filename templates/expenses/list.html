@@ -60,6 +60,10 @@
     background: #fffbf0;
     border: 1.5px dashed #f0c040;
 }
+[data-bs-theme="dark"] .record-card.not-spent {
+    background: rgba(240,192,64,.07);
+    border: 1.5px dashed rgba(240,192,64,.45);
+}
 </style>
 <script>
 function openExpenseDetail(el) {
@@ -83,9 +87,9 @@ function openExpenseDetail(el) {
         badgesEl.innerHTML += '<span class="badge bg-warning-subtle text-warning border border-warning">незапланированный</span>';
     }
     if (!exp.is_spent) {
-        badgesEl.innerHTML += '<span class="badge bg-warning text-dark">⏳ Не потрачено</span>';
+        badgesEl.innerHTML += '<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Не потрачено</span>';
     } else {
-        badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success">✅ Потрачено</span>';
+        badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-lg me-1"></i>Потрачено</span>';
     }
 
     const modalEl = document.getElementById('expenseDetailModal');
@@ -94,6 +98,26 @@ function openExpenseDetail(el) {
     }
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+
+// Подтверждение удаления через модал
+let _pendingDeleteForm = null;
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.expense-delete-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            _pendingDeleteForm = this;
+            const modalEl = document.getElementById('confirmDeleteModal');
+            if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    });
+    document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
+        if (_pendingDeleteForm) {
+            bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal')).hide();
+            _pendingDeleteForm.submit();
+        }
+    });
+});
 
 function setSort(value) {
     document.getElementById('sortInput').value = value;
@@ -176,10 +200,10 @@ function openAttachmentsModal(btn) {
         } else {
             const safe = att.fname.replace(/</g, '&lt;').replace(/>/g, '&gt;');
             item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
-                <div style="font-size:2.5rem">📄</div>
+                <div style="font-size:2.5rem"><i class="bi bi-file-earmark-text"></i></div>
                 <small class="text-muted text-center"
                        style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
-                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">↓ Скачать</a>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-download me-1"></i>Скачать</a>
             </div>`;
         }
         grid.appendChild(item);
@@ -196,6 +220,23 @@ function openAttachmentsModal(btn) {
 {% endblock %}
 
 {% block modals %}
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить расход?</div>
+                <div class="text-muted small mt-1">Это действие нельзя отменить</div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4" id="confirmDeleteBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Модал деталей расхода -->
 <div class="modal fade" id="expenseDetailModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -242,7 +283,10 @@ function openAttachmentsModal(btn) {
     {% for exp in expenses %}
     <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2{% if not exp.is_spent %} not-spent{% endif %}">
         <div style="min-width:0;cursor:pointer;flex:1"
+             role="button"
+             tabindex="0"
              onclick="openExpenseDetail(this)"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openExpenseDetail(this)}"
              data-exp='{
                 "category": "{{ exp.category.name | e }}",
                 "icon": "{{ exp.category.icon }}",
@@ -262,10 +306,10 @@ function openAttachmentsModal(btn) {
                     <span class="badge bg-warning-subtle text-warning" style="font-size:.7rem">незаплан.</span>
                 {% endif %}
                 {% if not exp.is_spent %}
-                    <span class="badge bg-warning text-dark" style="font-size:.7rem">⏳ Не потрачено</span>
+                    <span class="badge bg-warning text-dark" style="font-size:.7rem"><i class="bi bi-hourglass-split me-1"></i>Не потрачено</span>
                 {% endif %}
             </div>
-            <div class="fw-semibold text-truncate">{{ exp.description or '—' }}</div>
+            <div class="fw-semibold text-truncate" title="{{ exp.description or '—' }}">{{ exp.description or '—' }}</div>
             {% if exp.notes %}
             <div class="text-muted small fst-italic text-truncate">{{ exp.notes }}</div>
             {% endif %}
@@ -300,16 +344,18 @@ function openAttachmentsModal(btn) {
                 </button>
                 {% endif %}
                 <a href="{{ url_for('expense_edit', exp_id=exp.id, ret_year=year, ret_month=month) }}"
-                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px">
-                    <i class="bi bi-pencil"></i>
+                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px"
+                   aria-label="Редактировать расход">
+                    <i class="bi bi-pencil" aria-hidden="true"></i>
                 </a>
                 <form method="post" action="{{ url_for('expense_delete', exp_id=exp.id) }}"
-                      class="d-inline" onsubmit="return confirm('Удалить расход?')">
+                      class="d-inline expense-delete-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="ret_year"  value="{{ year }}">
                     <input type="hidden" name="ret_month" value="{{ month }}">
-                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px">
-                        <i class="bi bi-trash"></i>
+                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px"
+                            aria-label="Удалить расход">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
                     </button>
                 </form>
             </div>
