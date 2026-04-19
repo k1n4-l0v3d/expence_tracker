@@ -179,12 +179,41 @@ function previewImage(src) {
     }
 }
 
+let _attachmentsModalInstance = null;
+let _attachmentsSourceBtn = null;
+
+function updateAttachmentsTitle(count) {
+    const word = count === 1 ? 'файл' : count < 5 ? 'файла' : 'файлов';
+    document.getElementById('attachmentsModalTitle').textContent =
+        `Прикреплённые файлы · ${count} ${word}`;
+}
+
+async function deleteAttachmentFromModal(attId, itemEl) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/attachments/${attId}`, {
+        method: 'DELETE',
+        headers: {'X-CSRFToken': csrfToken},
+    });
+    if (!res.ok) return;
+    itemEl.remove();
+
+    const remaining = document.querySelectorAll('#attachmentsModalBody [data-att-id]').length;
+    if (remaining === 0) {
+        if (_attachmentsModalInstance) _attachmentsModalInstance.hide();
+    } else {
+        updateAttachmentsTitle(remaining);
+        if (_attachmentsSourceBtn) {
+            _attachmentsSourceBtn.innerHTML = `<i class="bi bi-paperclip"></i>${remaining}`;
+            const atts = JSON.parse(_attachmentsSourceBtn.dataset.attachments)
+                .filter(a => a.id !== attId);
+            _attachmentsSourceBtn.dataset.attachments = JSON.stringify(atts);
+        }
+    }
+}
+
 function openAttachmentsModal(btn) {
-    const desc = btn.dataset.expDesc;
     const atts = JSON.parse(btn.dataset.attachments);
-    const n = atts.length;
-    const word = n === 1 ? 'файл' : n < 5 ? 'файла' : 'файлов';
-    document.getElementById('attachmentsModalTitle').textContent = `Прикреплённые файлы · ${n} ${word}`;
+    updateAttachmentsTitle(atts.length);
 
     const body = document.getElementById('attachmentsModalBody');
     body.innerHTML = '';
@@ -193,6 +222,9 @@ function openAttachmentsModal(btn) {
 
     atts.forEach(att => {
         const item = document.createElement('div');
+        item.dataset.attId = att.id;
+        item.style.cssText = 'position:relative';
+
         if (att.mime.startsWith('image/')) {
             item.innerHTML = `<img src="/attachments/${att.id}"
                      style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:zoom-in"
@@ -203,9 +235,22 @@ function openAttachmentsModal(btn) {
                 <div style="font-size:2.5rem"><i class="bi bi-file-earmark-text"></i></div>
                 <small class="text-muted text-center"
                        style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
-                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-download me-1"></i>Скачать</a>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i>Скачать
+                </a>
             </div>`;
         }
+
+        // Кнопка удаления
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn btn-danger position-absolute top-0 end-0 rounded-circle p-0';
+        delBtn.style.cssText = 'width:22px;height:22px;min-width:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box';
+        delBtn.setAttribute('aria-label', 'Удалить вложение');
+        delBtn.innerHTML = '<i class="bi bi-x" aria-hidden="true"></i>';
+        delBtn.onclick = () => deleteAttachmentFromModal(att.id, item);
+        item.appendChild(delBtn);
+
         grid.appendChild(item);
     });
 
@@ -214,7 +259,16 @@ function openAttachmentsModal(btn) {
     if (modalEl.parentElement !== document.body) {
         document.body.appendChild(modalEl);
     }
-    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    _attachmentsSourceBtn = btn;
+    _attachmentsModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalEl.addEventListener('hidden.bs.modal', function onHidden() {
+        modalEl.removeEventListener('hidden.bs.modal', onHidden);
+        if (_attachmentsSourceBtn && document.querySelectorAll('#attachmentsModalBody [data-att-id]').length === 0) {
+            _attachmentsSourceBtn.remove();
+            _attachmentsSourceBtn = null;
+        }
+    });
+    _attachmentsModalInstance.show();
 }
 </script>
 {% endblock %}
