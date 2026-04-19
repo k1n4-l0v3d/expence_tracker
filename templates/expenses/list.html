@@ -88,7 +88,11 @@ function openExpenseDetail(el) {
         badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success">✅ Потрачено</span>';
     }
 
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('expenseDetailModal')).show();
+    const modalEl = document.getElementById('expenseDetailModal');
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
 function setSort(value) {
