@@ -905,6 +905,48 @@ def expense_toggle_spent(exp_id):
     return jsonify({'is_spent': exp.is_spent})
 
 
+@app.route('/expenses/<int:exp_id>/copy', methods=['POST'])
+@login_required
+@ban_check
+def expense_copy(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    months = data.get('months') if data else None
+    if not months or not isinstance(months, list):
+        return jsonify({'error': 'Укажите месяцы'}), 400
+
+    today = date.today()
+    current_year = today.year
+    created = 0
+
+    for m in months:
+        if not isinstance(m, int) or not (1 <= m <= 12):
+            continue
+        max_day = calendar.monthrange(current_year, m)[1]
+        target_day = min(exp.expense_date.day, max_day)
+        target_date = date(current_year, m, target_day)
+        is_spent = False if target_date > today else exp.is_spent
+        copy = Expense(
+            user_id      = current_user.id,
+            category_id  = exp.category_id,
+            amount       = exp.amount,
+            description  = exp.description,
+            expense_date = target_date,
+            is_planned   = exp.is_planned,
+            is_spent     = is_spent,
+            notes        = exp.notes,
+        )
+        db.session.add(copy)
+        created += 1
+
+    try:
+        db.session.commit()
+        return jsonify({'created': created})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
 @app.route('/categories/add', methods=['POST'])
 @login_required
 @ban_check
