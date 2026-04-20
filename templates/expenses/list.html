@@ -66,22 +66,25 @@
 }
 </style>
 <script>
+let _detailModalEl = null;
+
 function openExpenseDetail(el) {
     const exp = JSON.parse(el.dataset.exp);
 
-    document.getElementById('edCategoryBadge').textContent = exp.category;
-    document.getElementById('edCategoryBadge').style.background = exp.color;
+    if (!_detailModalEl) _detailModalEl = document.getElementById('expenseDetailModal');
 
-    document.getElementById('edDescription').textContent = exp.description || '—';
+    _detailModalEl.querySelector('#edCategoryBadge').textContent = exp.category;
+    _detailModalEl.querySelector('#edCategoryBadge').style.background = exp.color;
+    _detailModalEl.querySelector('#edDescription').textContent = exp.description || '—';
 
-    const notesEl = document.getElementById('edNotes');
+    const notesEl = _detailModalEl.querySelector('#edNotes');
     notesEl.textContent = exp.notes || '';
     notesEl.style.display = exp.notes ? '' : 'none';
 
-    document.getElementById('edAmount').textContent = exp.amount + ' ₽';
-    document.getElementById('edDate').textContent = exp.date;
+    _detailModalEl.querySelector('#edAmount').textContent = exp.amount + ' ₽';
+    _detailModalEl.querySelector('#edDate').textContent = exp.date;
 
-    const badgesEl = document.getElementById('edBadges');
+    const badgesEl = _detailModalEl.querySelector('#edBadges');
     badgesEl.innerHTML = '';
     if (!exp.is_planned) {
         badgesEl.innerHTML += '<span class="badge bg-warning-subtle text-warning border border-warning">незапланированный</span>';
@@ -92,11 +95,27 @@ function openExpenseDetail(el) {
         badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-lg me-1"></i>Потрачено</span>';
     }
 
-    const modalEl = document.getElementById('expenseDetailModal');
-    if (modalEl.parentElement !== document.body) {
-        document.body.appendChild(modalEl);
+    const copyBtn = _detailModalEl.querySelector('#copyFromDetailBtn');
+    if (copyBtn) {
+        const expId = el.dataset.expId;
+        const expMonth = new Date(exp.date.split('.').reverse().join('-')).getMonth() + 1;
+        copyBtn.onclick = () => {
+            const inst = bootstrap.Modal.getInstance(_detailModalEl);
+            if (inst) {
+                _detailModalEl.addEventListener('hidden.bs.modal', () => {
+                    openCopyModal(expId, expMonth, exp.description || exp.category, exp.amount);
+                }, {once: true});
+                inst.hide();
+            } else {
+                openCopyModal(expId, expMonth, exp.description || exp.category, exp.amount);
+            }
+        };
     }
-    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    if (_detailModalEl.parentElement !== document.body) {
+        document.body.appendChild(_detailModalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(_detailModalEl).show();
 }
 
 // Подтверждение удаления через модал
@@ -275,6 +294,100 @@ function openAttachmentsModal(btn) {
     _attachmentsModalInstance.show();
 }
 
+const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+let _copyExpId = null;
+let _copyExpMonth = null;
+let _copyModalEl = null;  // фиксируем элемент при первом открытии, до любых перемещений
+
+function openCopyModal(expId, expMonth, label, amount) {
+    _copyExpId = expId;
+    _copyExpMonth = parseInt(expMonth);
+
+    // Захватываем элемент один раз, пока DOM ещё не перемещён
+    if (!_copyModalEl) {
+        _copyModalEl = document.getElementById('copyExpenseModal');
+    }
+
+    _copyModalEl.querySelector('#copyExpenseLabel').textContent = label + ' — ' + amount + ' ₽';
+
+    const grid = _copyModalEl.querySelector('#copyMonthsGrid');
+    grid.innerHTML = '';
+    for (let m = 1; m <= 12; m++) {
+        const disabled = (m === _copyExpMonth);
+        const col = document.createElement('div');
+        col.className = 'col-12';  // одна колонка — месяцы идут по порядку сверху вниз
+        col.innerHTML = `<div class="form-check">
+            <input class="form-check-input copy-month-cb" type="checkbox"
+                   value="${m}" ${disabled ? 'disabled' : ''}
+                   onchange="updateCopySubmitBtn()">
+            <label class="form-check-label ${disabled ? 'text-muted' : ''}">
+                ${MONTH_NAMES[m-1]}${disabled ? ' <span class="text-muted small">(текущий)</span>' : ''}
+            </label>
+        </div>`;
+        grid.appendChild(col);
+    }
+
+    _copyModalEl.querySelector('#copySelectAll').checked = false;
+    updateCopySubmitBtn();
+
+    if (_copyModalEl.parentElement !== document.body) document.body.appendChild(_copyModalEl);
+    bootstrap.Modal.getOrCreateInstance(_copyModalEl).show();
+}
+
+function updateCopySubmitBtn() {
+    if (!_copyModalEl) return;
+    const cbs = [..._copyModalEl.querySelectorAll('.copy-month-cb:not(:disabled)')];
+    _copyModalEl.querySelector('#copyExpenseSubmit').disabled = !cbs.some(cb => cb.checked);
+    _copyModalEl.querySelector('#copySelectAll').checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.id === 'copySelectAll' && _copyModalEl) {
+        _copyModalEl.querySelectorAll('.copy-month-cb:not(:disabled)')
+            .forEach(cb => { cb.checked = e.target.checked; });
+        updateCopySubmitBtn();
+    }
+});
+
+async function submitCopyExpense() {
+    if (!_copyModalEl) return;
+    const months = [..._copyModalEl.querySelectorAll('.copy-month-cb:checked')]
+        .map(cb => parseInt(cb.value));
+    if (!months.length) return;
+
+    const btn = _copyModalEl.querySelector('#copyExpenseSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Копирование...';
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const res = await fetch(`/expenses/${_copyExpId}/copy`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({months}),
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+
+        bootstrap.Modal.getInstance(_copyModalEl).hide();
+
+        const n = data.created;
+        const word = n === 1 ? 'месяц' : n < 5 ? 'месяца' : 'месяцев';
+        const alertEl = document.createElement('div');
+        alertEl.className = 'alert alert-success alert-dismissible fade show';
+        alertEl.innerHTML = `<i class="bi bi-check-circle me-1"></i>Скопировано в ${n} ${word}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        document.querySelector('.container')?.prepend(alertEl);
+        setTimeout(() => alertEl?.remove(), 4000);
+    } catch(e) {
+        alert('Ошибка: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-copy me-1"></i>Копировать';
+    }
+}
+
 async function handleAttachmentUpload(input) {
     const file = input.files[0];
     if (!file) return;
@@ -391,6 +504,11 @@ async function handleAttachmentUpload(input) {
                 </div>
                 <div id="edBadges" class="d-flex gap-2 flex-wrap mt-3"></div>
             </div>
+            <div class="modal-footer border-0 pt-0 justify-content-start">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="copyFromDetailBtn">
+                    <i class="bi bi-copy me-1"></i>Скопировать на другие месяцы
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -413,6 +531,37 @@ async function handleAttachmentUpload(input) {
         </div>
     </div>
 </div>
+<!-- Модал копирования расхода по месяцам -->
+<div class="modal fade" id="copyExpenseModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <div>
+                    <h6 class="modal-title fw-semibold mb-0">
+                        <i class="bi bi-copy me-2 text-primary"></i>Копировать расход
+                    </h6>
+                    <div id="copyExpenseLabel" class="text-muted small mt-1"></div>
+                </div>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="copySelectAll">
+                    <label class="form-check-label fw-semibold" for="copySelectAll">Выбрать все месяцы</label>
+                </div>
+                <hr class="my-2">
+                <div class="row g-2" id="copyMonthsGrid"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn grad-primary btn-sm" id="copyExpenseSubmit" disabled
+                        onclick="submitCopyExpense()">
+                    <i class="bi bi-copy me-1"></i>Копировать
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 <div>
@@ -421,6 +570,7 @@ async function handleAttachmentUpload(input) {
         <div style="min-width:0;cursor:pointer;flex:1"
              role="button"
              tabindex="0"
+             data-exp-id="{{ exp.id }}"
              onclick="openExpenseDetail(this)"
              onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openExpenseDetail(this)}"
              data-exp='{
@@ -480,6 +630,12 @@ async function handleAttachmentUpload(input) {
                     <i class="bi bi-check-lg me-1"></i>Потрачено
                 </button>
                 {% endif %}
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        style="min-height:34px;padding:4px 8px"
+                        aria-label="Копировать на другие месяцы"
+                        onclick="openCopyModal({{ exp.id }}, {{ exp.expense_date.month }}, {{ (exp.description or exp.category.name) | tojson }}, '{{ '%.2f'|format(exp.amount|float) }}')">
+                    <i class="bi bi-copy" aria-hidden="true"></i>
+                </button>
                 <a href="{{ url_for('expense_edit', exp_id=exp.id, ret_year=year, ret_month=month) }}"
                    class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px"
                    aria-label="Редактировать расход">
