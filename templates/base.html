@@ -71,12 +71,24 @@
                         <i class="bi bi-piggy-bank me-1"></i>Бюджет
                     </a>
                 </li>
-                <li class="nav-item ms-2">
-                    <a class="nav-link btn btn-sm px-3 text-white pulse-btn"
-                       style="background:rgba(255,255,255,.2);border-radius:10px"
-                       href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                <li class="nav-item ms-2 dropdown">
+                    <button class="btn btn-sm px-3 text-white pulse-btn dropdown-toggle"
+                            style="background:rgba(255,255,255,.2);border-radius:10px;border:none"
+                            data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-plus-lg me-1"></i>Добавить
-                    </a>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                            </a>
+                        </li>
+                    </ul>
                 </li>
                 <li class="nav-item ms-2 dropdown">
                     <a class="nav-link dropdown-toggle text-white d-flex align-items-center gap-2"
@@ -154,9 +166,23 @@
         <i class="bi bi-list-ul"></i>
         <span>Расходы</span>
     </a>
-    <a href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}" class="add-btn">
-        <i class="bi bi-plus-lg"></i>
-    </a>
+    <div class="dropup">
+        <button class="add-btn" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-center mb-2" style="min-width:160px">
+            <li>
+                <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                </a>
+            </li>
+        </ul>
+    </div>
     <a href="{{ url_for('income_list', year=nav_year, month=nav_month) }}"
        class="{% if 'income' in request.endpoint %}active{% endif %}">
         <i class="bi bi-arrow-down-circle"></i>

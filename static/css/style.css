@@ -456,10 +456,20 @@ body {
     transition: overflow 0s 0s;  /* переключаем немедленно */
 }
 
+/* ── Dropdown animation ─────────────────────────────────────── */
+@keyframes dropdown-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.dropdown-menu.show {
+    animation: dropdown-in 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .month-pill.animating          { animation: none; opacity: 1; }
     .month-pill.ready:hover        { transform: none; }
     .stat-collapsible,
     .stat-collapsible.is-collapsed { transition: none; }
     .stat-chevron                  { transition: none; }
+    .dropdown-menu.show            { animation: none; }
 }
