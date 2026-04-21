@@ -487,6 +487,23 @@ body {
     transition: overflow 0s 0s;  /* переключаем немедленно */
 }
 
+/* ── Navbar «Добавить» — убрать подсветку focus/show ───────── */
+.navbar .pulse-btn.dropdown-toggle:focus,
+.navbar .pulse-btn.dropdown-toggle:focus-visible,
+.navbar .pulse-btn.dropdown-toggle.show {
+    box-shadow: none !important;
+    outline: none;
+    background: rgba(255,255,255,.2) !important;
+}
+
+/* ── Dropdown items: отключить hover-ghost на touch-устройствах */
+@media (hover: none) and (pointer: coarse) {
+    .dropdown-menu .dropdown-item:hover {
+        color: var(--bs-body-color);
+        background-color: transparent;
+    }
+}
+
 /* ── Dropdown animation ─────────────────────────────────────── */
 @keyframes dropdown-in {
     from { opacity: 0; transform: translateY(-8px); }
