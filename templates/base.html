@@ -239,11 +239,16 @@
     });
     applyTheme(localStorage.getItem('theme') || 'light');
 
-    // Закрывать dropdown при скролле (мобильный)
+    // Закрывать dropdown при скролле (мобильный) — с анимацией
     window.addEventListener('scroll', () => {
-        document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+        document.querySelectorAll('.dropdown-menu.show:not(.hiding)').forEach(menu => {
             const toggle = menu.closest('.dropdown, .dropup')?.querySelector('[data-bs-toggle="dropdown"]');
-            if (toggle) bootstrap.Dropdown.getInstance(toggle)?.hide();
+            if (!toggle) return;
+            menu.classList.add('hiding');
+            setTimeout(() => {
+                menu.classList.remove('hiding');
+                bootstrap.Dropdown.getInstance(toggle)?.hide();
+            }, 180);
         });
     }, { passive: true });
 
