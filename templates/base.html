@@ -239,6 +239,14 @@
     });
     applyTheme(localStorage.getItem('theme') || 'light');
 
+    // Закрывать dropdown при скролле (мобильный)
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+            const toggle = menu.closest('.dropdown, .dropup')?.querySelector('[data-bs-toggle="dropdown"]');
+            if (toggle) bootstrap.Dropdown.getInstance(toggle)?.hide();
+        });
+    }, { passive: true });
+
     // Плавные переходы между страницами
     if (document.startViewTransition) {
         document.addEventListener('click', e => {

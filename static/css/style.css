@@ -487,10 +487,17 @@ body {
     transition: overflow 0s 0s;  /* переключаем немедленно */
 }
 
-/* ── Navbar «Добавить» — убрать подсветку focus/show ───────── */
-.navbar .pulse-btn.dropdown-toggle:focus,
-.navbar .pulse-btn.dropdown-toggle:focus-visible,
-.navbar .pulse-btn.dropdown-toggle.show {
+/* ── Navbar «Добавить» — стиль кнопки ──────────────────────── */
+.navbar .pulse-btn {
+    animation: none;
+    transition: background 0.18s;
+}
+.navbar .pulse-btn:hover {
+    background: rgba(255,255,255,.32) !important;
+}
+.navbar .pulse-btn:focus,
+.navbar .pulse-btn:focus-visible,
+.navbar .pulse-btn.show {
     box-shadow: none !important;
     outline: none;
     background: rgba(255,255,255,.2) !important;
