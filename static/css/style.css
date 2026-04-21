@@ -118,6 +118,37 @@ body {
         background: var(--bs-primary-bg-subtle);
     }
 
+    /* Центральная кнопка «+» в нижней навигации */
+    .bottom-nav .dropup {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .bottom-nav .dropup .add-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: none;
+        background: linear-gradient(135deg, var(--bs-primary), #00b4d8);
+        color: #fff;
+        font-size: 1.4rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 14px rgba(67,97,238,.35);
+        transition: transform 0.15s, box-shadow 0.15s;
+        padding: 0;
+        cursor: pointer;
+    }
+
+    .bottom-nav .dropup .add-btn:active {
+        transform: scale(0.92);
+        box-shadow: 0 2px 8px rgba(67,97,238,.25);
+    }
+
     /* Скрываем десктопный navbar на мобильном */
     .navbar .navbar-collapse {
         display: none !important;
@@ -173,8 +204,8 @@ body {
     background: rgba(67, 97, 238, 0.12);
 }
 
-[data-bs-theme="dark"] .bottom-nav a.add-btn {
-    background: linear-gradient(135deg, #4361ee, #00b4d8) !important;
+[data-bs-theme="dark"] .bottom-nav .dropup .add-btn {
+    background: linear-gradient(135deg, #4361ee, #00b4d8);
     box-shadow: 0 4px 16px rgba(67, 97, 238, 0.5);
 }
 

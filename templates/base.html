@@ -170,7 +170,7 @@
         <button class="add-btn" data-bs-toggle="dropdown" aria-expanded="false">
             <i class="bi bi-plus-lg"></i>
         </button>
-        <ul class="dropdown-menu dropdown-menu-center mb-2" style="min-width:160px">
+        <ul class="dropdown-menu mb-2" style="min-width:160px;left:50%;transform:translateX(-50%)">
             <li>
                 <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
                     <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
