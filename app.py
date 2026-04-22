@@ -600,6 +600,154 @@ def profile_export():
     )
 
 
+@app.route('/profile/import', methods=['POST'])
+@login_required
+@ban_check
+def profile_import():
+    f = request.files.get('file')
+    if not f or not f.filename:
+        flash('Файл не выбран.', 'danger')
+        return redirect(url_for('profile'))
+
+    if not f.filename.lower().endswith('.xlsx'):
+        flash('Допускается только формат .xlsx.', 'danger')
+        return redirect(url_for('profile'))
+
+    data = f.read()
+    if len(data) > 5 * 1024 * 1024:
+        flash('Файл слишком большой (максимум 5 МБ).', 'danger')
+        return redirect(url_for('profile'))
+
+    try:
+        wb = openpyxl.load_workbook(filename=io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        flash('Не удалось прочитать файл. Убедитесь, что это корректный .xlsx.', 'danger')
+        return redirect(url_for('profile'))
+
+    exp_count = inc_count = skipped = 0
+
+    # ── Импорт расходов ───────────────────────────────────────────
+    if 'Расходы' in wb.sheetnames:
+        ws = wb['Расходы']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, cat_name, amount_val = vals[0], vals[1], vals[2]
+            desc    = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+            planned = str(vals[4]).strip().lower() == 'да' if len(vals) > 4 and vals[4] else False
+            spent   = str(vals[5]).strip().lower() == 'да' if len(vals) > 5 and vals[5] else True
+            notes   = str(vals[6]).strip() if len(vals) > 6 and vals[6] else ''
+
+            try:
+                if isinstance(date_str, date):
+                    exp_date = date_str
+                else:
+                    exp_date = datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            cat_name_str = str(cat_name).strip() if cat_name else 'Прочее'
+            if not cat_name_str:
+                cat_name_str = 'Прочее'
+
+            category = Category.query.filter(
+                db.func.lower(Category.name) == cat_name_str.lower(),
+                db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+                Category.is_active.is_(True),
+            ).first()
+
+            if not category:
+                category = Category(name=cat_name_str, user_id=current_user.id)
+                db.session.add(category)
+                db.session.flush()
+
+            db.session.add(Expense(
+                user_id      = current_user.id,
+                category_id  = category.id,
+                amount       = amount,
+                description  = desc or None,
+                expense_date = exp_date,
+                is_planned   = planned,
+                is_spent     = spent,
+                notes        = notes or None,
+            ))
+            exp_count += 1
+
+    # ── Импорт доходов ────────────────────────────────────────────
+    if 'Доходы' in wb.sheetnames:
+        ws = wb['Доходы']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, source_val, amount_val = vals[0], vals[1], vals[2]
+            desc  = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+            notes = str(vals[4]).strip() if len(vals) > 4 and vals[4] else ''
+
+            try:
+                if isinstance(date_str, date):
+                    inc_date = date_str
+                else:
+                    inc_date = datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            source = str(source_val).strip() if source_val else ''
+            if not source:
+                skipped += 1
+                continue
+
+            db.session.add(Income(
+                user_id     = current_user.id,
+                amount      = amount,
+                source      = source,
+                description = desc or None,
+                income_date = inc_date,
+                notes       = notes or None,
+            ))
+            inc_count += 1
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash('Ошибка при сохранении данных.', 'danger')
+        return redirect(url_for('profile'))
+
+    word_exp = 'расход' if exp_count == 1 else ('расхода' if exp_count < 5 else 'расходов')
+    word_inc = 'доход'  if inc_count == 1 else ('дохода'  if inc_count < 5 else 'доходов')
+    msg = f'Импортировано: {exp_count} {word_exp}, {inc_count} {word_inc}.'
+    if skipped:
+        msg += f' Пропущено строк: {skipped}.'
+    flash(msg, 'success')
+    return redirect(url_for('profile'))
+
+
 # ─── Администраторская панель ──────────────────────────────────────────────────
 
 @app.route('/admin')
