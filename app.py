@@ -16,6 +16,8 @@ import random
 import calendar
 import re
 import threading
+import openpyxl
+from openpyxl.styles import Font
 
 
 class RateLimiter:
@@ -518,6 +520,84 @@ def change_avatar():
     db.session.commit()
     flash('Аватарка обновлена!', 'success')
     return redirect(url_for('profile'))
+
+
+@app.route('/profile/export')
+@login_required
+@ban_check
+def profile_export():
+    today = date.today()
+    year  = today.year
+
+    expenses = (Expense.query
+                .filter(Expense.user_id == current_user.id,
+                        extract('year', Expense.expense_date) == year)
+                .join(Category)
+                .order_by(Expense.expense_date)
+                .all())
+
+    incomes = (Income.query
+               .filter(Income.user_id == current_user.id,
+                       extract('year', Income.income_date) == year)
+               .order_by(Income.income_date)
+               .all())
+
+    wb = openpyxl.Workbook()
+
+    # ── Лист «Расходы» ────────────────────────────────────────────
+    ws_exp = wb.active
+    ws_exp.title = 'Расходы'
+    exp_headers = ['Дата', 'Категория', 'Сумма', 'Описание', 'Плановый', 'Оплачен', 'Заметки']
+    ws_exp.append(exp_headers)
+    for cell in ws_exp[1]:
+        cell.font = Font(bold=True)
+
+    for exp in expenses:
+        ws_exp.append([
+            exp.expense_date.strftime('%d.%m.%Y'),
+            exp.category.name,
+            float(exp.amount),
+            exp.description or '',
+            'Да' if exp.is_planned else 'Нет',
+            'Да' if exp.is_spent  else 'Нет',
+            exp.notes or '',
+        ])
+
+    for col in ws_exp.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_exp.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Доходы» ────────────────────────────────────────────
+    ws_inc = wb.create_sheet('Доходы')
+    inc_headers = ['Дата', 'Источник', 'Сумма', 'Описание', 'Заметки']
+    ws_inc.append(inc_headers)
+    for cell in ws_inc[1]:
+        cell.font = Font(bold=True)
+
+    for inc in incomes:
+        ws_inc.append([
+            inc.income_date.strftime('%d.%m.%Y'),
+            inc.source,
+            float(inc.amount),
+            inc.description or '',
+            inc.notes or '',
+        ])
+
+    for col in ws_inc.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_inc.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f'расходы_доходы_{year}.xlsx'
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
 
 
 # ─── Администраторская панель ──────────────────────────────────────────────────
