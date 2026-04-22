@@ -127,6 +127,35 @@
                 </form>
             </div>
         </div>
+
+        <!-- Экспорт / Импорт данных -->
+        <div class="card shadow-sm border-0 mt-4">
+            <div class="card-header border-0 fw-semibold pt-3">
+                <i class="bi bi-file-earmark-excel me-2 text-success"></i>Данные
+            </div>
+            <div class="card-body">
+                <a href="{{ url_for('profile_export') }}"
+                   class="btn btn-outline-success btn-sm">
+                    <i class="bi bi-download me-1"></i>Скачать Excel за {{ current_year }}
+                </a>
+
+                <hr class="my-3">
+
+                <form method="POST" action="{{ url_for('profile_import') }}"
+                      enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label class="form-label fw-semibold">Загрузить данные из Excel:</label>
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <input type="file" name="file" accept=".xlsx"
+                               class="form-control form-control-sm" style="max-width:260px">
+                        <button type="submit" class="btn btn-outline-primary btn-sm text-nowrap">
+                            <i class="bi bi-upload me-1"></i>Загрузить
+                        </button>
+                    </div>
+                    <div class="text-muted small mt-1">Только .xlsx, максимум 5 МБ</div>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

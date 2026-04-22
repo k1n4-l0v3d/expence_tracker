@@ -482,7 +482,8 @@ def profile():
                            total_income=float(total_income),
                            expense_count=expense_count,
                            income_count=income_count,
-                           today=today)
+                           today=today,
+                           current_year=today.year)
 
 
 @app.route('/profile/change-password', methods=['POST'])
