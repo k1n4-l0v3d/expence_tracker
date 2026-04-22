@@ -477,13 +477,22 @@ def profile():
         .filter(Income.user_id == current_user.id).scalar()
     expense_count = Expense.query.filter_by(user_id=current_user.id).count()
     income_count  = Income.query.filter_by(user_id=current_user.id).count()
+
+    # Годы с данными для выпадающего списка в экспорте
+    exp_years = [r[0] for r in db.session.query(extract('year', Expense.expense_date).label('y'))
+                 .filter(Expense.user_id == current_user.id).distinct().all()]
+    inc_years = [r[0] for r in db.session.query(extract('year', Income.income_date).label('y'))
+                 .filter(Income.user_id == current_user.id).distinct().all()]
+    export_years = sorted(set(exp_years) | set(inc_years) | {today.year}, reverse=True)
+
     return render_template('profile.html',
                            total_expenses=float(total_expenses),
                            total_income=float(total_income),
                            expense_count=expense_count,
                            income_count=income_count,
                            today=today,
-                           current_year=today.year)
+                           current_year=today.year,
+                           export_years=export_years)
 
 
 @app.route('/profile/change-password', methods=['POST'])
@@ -528,20 +537,31 @@ def change_avatar():
 @ban_check
 def profile_export():
     today = date.today()
-    year  = today.year
+    try:
+        year = int(request.args.get('year', today.year))
+    except (ValueError, TypeError):
+        year = today.year
+    try:
+        month = int(request.args.get('month', 0))
+        if month not in range(0, 13):
+            month = 0
+    except (ValueError, TypeError):
+        month = 0
 
-    expenses = (Expense.query
-                .filter(Expense.user_id == current_user.id,
-                        extract('year', Expense.expense_date) == year)
-                .join(Category)
-                .order_by(Expense.expense_date)
-                .all())
+    exp_q = Expense.query.filter(
+        Expense.user_id == current_user.id,
+        extract('year', Expense.expense_date) == year,
+    )
+    inc_q = Income.query.filter(
+        Income.user_id == current_user.id,
+        extract('year', Income.income_date) == year,
+    )
+    if month:
+        exp_q = exp_q.filter(extract('month', Expense.expense_date) == month)
+        inc_q = inc_q.filter(extract('month', Income.income_date) == month)
 
-    incomes = (Income.query
-               .filter(Income.user_id == current_user.id,
-                       extract('year', Income.income_date) == year)
-               .order_by(Income.income_date)
-               .all())
+    expenses = exp_q.join(Category).order_by(Expense.expense_date).all()
+    incomes  = inc_q.order_by(Income.income_date).all()
 
     wb = openpyxl.Workbook()
 
@@ -588,11 +608,35 @@ def profile_export():
         width = max(len(str(cell.value or '')) for cell in col) + 4
         ws_inc.column_dimensions[col[0].column_letter].width = min(width, 40)
 
+    # ── Лист «Бюджет» ────────────────────────────────────────────
+    bud_q = (MonthlyBudget.query
+             .filter(MonthlyBudget.user_id == current_user.id,
+                     MonthlyBudget.year == year)
+             .join(Category)
+             .order_by(MonthlyBudget.month, Category.name))
+    if month:
+        bud_q = bud_q.filter(MonthlyBudget.month == month)
+    budgets = bud_q.all()
+
+    ws_bud = wb.create_sheet('Бюджет')
+    bud_headers = ['Год', 'Месяц', 'Категория', 'Сумма']
+    ws_bud.append(bud_headers)
+    for cell in ws_bud[1]:
+        cell.font = Font(bold=True)
+
+    for b in budgets:
+        ws_bud.append([b.year, b.month, b.category.name, float(b.amount)])
+
+    for col in ws_bud.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_bud.column_dimensions[col[0].column_letter].width = min(width, 40)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
 
-    filename = f'расходы_доходы_{year}.xlsx'
+    month_names = ['','янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек']
+    filename = f'расходы_доходы_{year}_{month_names[month]}.xlsx' if month else f'расходы_доходы_{year}.xlsx'
     return send_file(
         buf,
         as_attachment=True,
@@ -733,6 +777,71 @@ def profile_import():
             ))
             inc_count += 1
 
+    # ── Импорт бюджета ────────────────────────────────────────────
+    bud_count = 0
+    if 'Бюджет' in wb.sheetnames:
+        ws = wb['Бюджет']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 4:
+                skipped += 1
+                continue
+            year_val, month_val, cat_name, amount_val = vals[0], vals[1], vals[2], vals[3]
+
+            try:
+                bud_year  = int(year_val)
+                bud_month = int(month_val)
+                if not (1 <= bud_month <= 12) or bud_year < 2000:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            cat_name_str = str(cat_name).strip() if cat_name else 'Прочее'
+            if not cat_name_str:
+                cat_name_str = 'Прочее'
+
+            category = Category.query.filter(
+                db.func.lower(Category.name) == cat_name_str.lower(),
+                db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+                Category.is_active.is_(True),
+            ).first()
+
+            if not category:
+                category = Category(name=cat_name_str, user_id=current_user.id)
+                db.session.add(category)
+                db.session.flush()
+
+            # Upsert: обновить если уже есть, иначе создать
+            existing = MonthlyBudget.query.filter_by(
+                user_id=current_user.id,
+                category_id=category.id,
+                year=bud_year,
+                month=bud_month,
+            ).first()
+
+            if existing:
+                existing.amount = amount
+            else:
+                db.session.add(MonthlyBudget(
+                    user_id=current_user.id,
+                    category_id=category.id,
+                    year=bud_year,
+                    month=bud_month,
+                    amount=amount,
+                ))
+            bud_count += 1
+
     try:
         db.session.commit()
     except Exception:
@@ -742,7 +851,8 @@ def profile_import():
 
     word_exp = 'расход' if exp_count == 1 else ('расхода' if exp_count < 5 else 'расходов')
     word_inc = 'доход'  if inc_count == 1 else ('дохода'  if inc_count < 5 else 'доходов')
-    msg = f'Импортировано: {exp_count} {word_exp}, {inc_count} {word_inc}.'
+    word_bud = 'запись бюджета' if bud_count == 1 else ('записи бюджета' if bud_count < 5 else 'записей бюджета')
+    msg = f'Импортировано: {exp_count} {word_exp}, {inc_count} {word_inc}, {bud_count} {word_bud}.'
     if skipped:
         msg += f' Пропущено строк: {skipped}.'
     flash(msg, 'success')

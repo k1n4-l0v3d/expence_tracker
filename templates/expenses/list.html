@@ -120,19 +120,25 @@ function openExpenseDetail(el) {
 
 // Подтверждение удаления через модал
 let _pendingDeleteForm = null;
+let _confirmDeleteModalEl = null;
 document.addEventListener('DOMContentLoaded', function() {
+    // Захватываем ссылку до любых переносов в body (избегаем поиск дубликата)
+    _confirmDeleteModalEl = document.getElementById('confirmDeleteModal');
+
     document.querySelectorAll('.expense-delete-form').forEach(function(form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();
             _pendingDeleteForm = this;
-            const modalEl = document.getElementById('confirmDeleteModal');
-            if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
-            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            if (_confirmDeleteModalEl.parentElement !== document.body) {
+                document.body.appendChild(_confirmDeleteModalEl);
+            }
+            bootstrap.Modal.getOrCreateInstance(_confirmDeleteModalEl).show();
         });
     });
-    document.getElementById('confirmDeleteBtn').addEventListener('click', function() {
+    _confirmDeleteModalEl.querySelector('#confirmDeleteBtn').addEventListener('click', function() {
         if (_pendingDeleteForm) {
-            bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal')).hide();
+            const inst = bootstrap.Modal.getInstance(_confirmDeleteModalEl);
+            if (inst) inst.hide();
             _pendingDeleteForm.submit();
         }
     });
