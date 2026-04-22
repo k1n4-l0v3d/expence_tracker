@@ -134,10 +134,31 @@
                 <i class="bi bi-file-earmark-excel me-2 text-success"></i>Данные
             </div>
             <div class="card-body">
-                <a href="{{ url_for('profile_export') }}"
-                   class="btn btn-outline-success btn-sm">
-                    <i class="bi bi-download me-1"></i>Скачать Excel за {{ current_year }}
-                </a>
+                <form method="GET" action="{{ url_for('profile_export') }}"
+                      class="d-flex gap-2 align-items-end flex-wrap">
+                    <div>
+                        <label class="form-label fw-semibold mb-1">Год</label>
+                        <select name="year" class="form-select form-select-sm" style="min-width:90px">
+                            {% for y in export_years %}
+                            <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label fw-semibold mb-1">Месяц</label>
+                        <select name="month" class="form-select form-select-sm" style="min-width:130px">
+                            <option value="0">Все месяцы</option>
+                            {% for m, name in [(1,'Январь'),(2,'Февраль'),(3,'Март'),(4,'Апрель'),
+                                               (5,'Май'),(6,'Июнь'),(7,'Июль'),(8,'Август'),
+                                               (9,'Сентябрь'),(10,'Октябрь'),(11,'Ноябрь'),(12,'Декабрь')] %}
+                            <option value="{{ m }}">{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-download me-1"></i>Скачать Excel
+                    </button>
+                </form>
 
                 <hr class="my-3">
 
