@@ -1353,6 +1353,43 @@ def category_delete(cat_id):
         return jsonify({'error': 'Ошибка сервера'}), 500
 
 
+@app.route('/categories/<int:cat_id>', methods=['PATCH'])
+@login_required
+@ban_check
+def category_edit(cat_id):
+    cat = Category.query.filter_by(id=cat_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+
+    name  = (data.get('name') or '').strip()
+    color = (data.get('color') or '').strip()
+
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
+
+    conflict = Category.query.filter(
+        db.func.lower(Category.name) == name.lower(),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+        Category.id != cat_id,
+    ).first()
+    if conflict:
+        return jsonify({'error': f'Категория «{conflict.name}» уже существует'}), 409
+
+    cat.name  = name
+    cat.color = color
+    try:
+        db.session.commit()
+        return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
 # ─── Attachments ──────────────────────────────────────────────────────────────
 
 ALLOWED_MIME_TYPES  = {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}
