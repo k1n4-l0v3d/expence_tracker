@@ -1770,4 +1770,7 @@ with app.app_context():
             conn.commit()
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    host  = os.getenv('FLASK_HOST', '127.0.0.1')
+    port  = int(os.getenv('FLASK_PORT', 5000))
+    debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host=host, port=port, debug=debug)
