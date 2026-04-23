@@ -177,6 +177,23 @@
                 </form>
             </div>
         </div>
+
+        <!-- Опасная зона -->
+        <div class="card shadow-sm border-0 mt-4" style="border:1px solid var(--bs-danger-border-subtle)">
+            <div class="card-header border-0 fw-semibold pt-3 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>Опасная зона
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Расходы, доходы и бюджет за всё время будут удалены безвозвратно.
+                    Категории сохранятся.
+                </p>
+                <button type="button" class="btn btn-outline-danger btn-sm"
+                        data-bs-toggle="modal" data-bs-target="#clearDataModal">
+                    <i class="bi bi-trash me-1"></i>Очистить все данные
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -227,6 +244,34 @@
                 </form>
                 {% endif %}
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модал подтверждения очистки данных -->
+<div class="modal fade" id="clearDataModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h6 class="modal-title fw-semibold text-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>Удалить все данные?
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                Это действие <strong>необратимо</strong>. Все расходы, доходы и бюджет
+                будут удалены навсегда. Категории останутся.
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        data-bs-dismiss="modal">Отмена</button>
+                <form method="POST" action="{{ url_for('profile_clear_data') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger btn-sm">
+                        <i class="bi bi-trash me-1"></i>Удалить всё
+                    </button>
+                </form>
             </div>
         </div>
     </div>
