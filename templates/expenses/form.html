@@ -161,14 +161,22 @@
         <div class="fw-semibold small text-muted mb-2">Мои категории</div>
         <div id="userCatList">
           {% for cat in user_cats %}
-          <div class="d-flex align-items-center justify-content-between py-1 gap-2" id="cat-row-{{ cat.id }}">
+          <div class="d-flex align-items-center justify-content-between py-1 gap-2" id="cat-row-{{ cat.id }}"
+               data-cat-name="{{ cat.name }}" data-cat-color="{{ cat.color }}">
             <span class="d-flex align-items-center gap-2 text-truncate">
-              <span style="width:10px;height:10px;border-radius:50%;background:{{ cat.color }};flex-shrink:0"></span>
-              <span class="small text-truncate">{{ cat.name }}</span>
+              <span class="cat-color-dot" style="width:10px;height:10px;border-radius:50%;background:{{ cat.color }};flex-shrink:0"></span>
+              <span class="small text-truncate cat-name-label">{{ cat.name }}</span>
             </span>
-            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 flex-shrink-0"
-                    style="font-size:.7rem"
-                    onclick="deleteCategoryRow({{ cat.id }}, this)">✕</button>
+            <div class="d-flex gap-1 flex-shrink-0">
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                      style="font-size:.7rem" title="Редактировать"
+                      onclick="openEditCategory({{ cat.id }}, this.closest('[id^=cat-row]'))">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1"
+                      style="font-size:.7rem"
+                      onclick="deleteCategoryRow({{ cat.id }}, this)">✕</button>
+            </div>
           </div>
           {% endfor %}
         </div>
