@@ -859,6 +859,22 @@ def profile_import():
     return redirect(url_for('profile'))
 
 
+@app.route('/profile/clear-data', methods=['POST'])
+@login_required
+@ban_check
+def profile_clear_data():
+    try:
+        Expense.query.filter_by(user_id=current_user.id).delete()
+        Income.query.filter_by(user_id=current_user.id).delete()
+        MonthlyBudget.query.filter_by(user_id=current_user.id).delete()
+        db.session.commit()
+        flash('Все данные очищены.', 'warning')
+    except Exception:
+        db.session.rollback()
+        flash('Ошибка при удалении данных.', 'danger')
+    return redirect(url_for('profile'))
+
+
 # ─── Администраторская панель ──────────────────────────────────────────────────
 
 @app.route('/admin')
