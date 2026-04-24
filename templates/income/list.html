@@ -147,8 +147,13 @@ function openIncomeDetail(el) {
                 "amount": "{{ "%.2f"|format(inc.amount|float) }}",
                 "date": "{{ inc.income_date.strftime("%d.%m.%Y") }}"
              }'>
-            <div class="fw-semibold text-truncate">
+            <div class="fw-semibold text-truncate d-flex align-items-center gap-1 flex-wrap">
                 <i class="bi bi-arrow-down-circle text-success me-1"></i>{{ inc.source }}
+                {% if inc.savings_account %}
+                    <span class="badge" style="font-size:.7rem;background:{{ inc.savings_account.color }}22;color:{{ inc.savings_account.color }};border:1px solid {{ inc.savings_account.color }}55">
+                        <i class="bi bi-piggy-bank me-1"></i>{{ inc.savings_account.name }}
+                    </span>
+                {% endif %}
             </div>
             <div class="text-muted small text-truncate">{{ inc.description or '—' }}</div>
             {% if inc.notes %}

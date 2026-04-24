@@ -600,6 +600,11 @@ async function handleAttachmentUpload(input) {
                 {% if not exp.is_spent %}
                     <span class="badge bg-warning text-dark" style="font-size:.7rem"><i class="bi bi-hourglass-split me-1"></i>Не потрачено</span>
                 {% endif %}
+                {% if exp.savings_account %}
+                    <span class="badge" style="font-size:.7rem;background:{{ exp.savings_account.color }}22;color:{{ exp.savings_account.color }};border:1px solid {{ exp.savings_account.color }}55">
+                        <i class="bi bi-piggy-bank me-1"></i>{{ exp.savings_account.name }}
+                    </span>
+                {% endif %}
             </div>
             <div class="fw-semibold text-truncate" title="{{ exp.description or '—' }}">{{ exp.description or '—' }}</div>
             {% if exp.notes %}
