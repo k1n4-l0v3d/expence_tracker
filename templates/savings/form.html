@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Редактировать счёт{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-pencil text-primary me-2"></i>Редактировать счёт
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Название *</label>
+                        <input type="text" name="name" class="form-control"
+                               maxlength="100" value="{{ acc.name }}" required>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col">
+                            <label class="form-label fw-semibold">Цвет</label>
+                            <input type="color" name="color" class="form-control form-control-color w-100"
+                                   value="{{ acc.color }}">
+                        </div>
+                        <div class="col">
+                            <label class="form-label fw-semibold">Иконка</label>
+                            <input type="text" name="icon" class="form-control"
+                                   value="{{ acc.icon }}" placeholder="bi-piggy-bank">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Целевая сумма</label>
+                        <input type="number" name="target_amount" class="form-control"
+                               min="1" step="0.01"
+                               value="{{ acc.target_amount|float if acc.target_amount else '' }}"
+                               placeholder="необязательно">
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn grad-primary btn-sm">Сохранить</button>
+                        <a href="{{ url_for('savings_list') }}"
+                           class="btn btn-outline-secondary btn-sm">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

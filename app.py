@@ -1646,6 +1646,146 @@ def income_delete(inc_id):
     return redirect(url_for('income_list', year=ret_year, month=ret_month))
 
 
+# ─── Накопительные счета ──────────────────────────────────────────────────────
+
+@app.route('/savings')
+@login_required
+@ban_check
+def savings_list():
+    uid = current_user.id
+    accounts = SavingsAccount.query.filter_by(
+        user_id=uid, is_active=True
+    ).order_by(SavingsAccount.created_at.asc()).all()
+
+    account_data = []
+    for acc in accounts:
+        balance  = get_account_balance(acc.id)
+        tx_count = (Expense.query.filter_by(savings_account_id=acc.id).count() +
+                    Income.query.filter_by(savings_account_id=acc.id).count())
+        pct = None
+        if acc.target_amount and float(acc.target_amount) > 0:
+            pct = min(round(balance / float(acc.target_amount) * 100, 1), 100.0)
+        account_data.append({'acc': acc, 'balance': balance, 'tx_count': tx_count, 'pct': pct})
+
+    deposits = (Expense.query
+                .filter(Expense.user_id == uid, Expense.savings_account_id.isnot(None))
+                .options(joinedload(Expense.savings_account)).all())
+    withdrawals = (Income.query
+                   .filter(Income.user_id == uid, Income.savings_account_id.isnot(None))
+                   .options(joinedload(Income.savings_account)).all())
+
+    history = []
+    for d in deposits:
+        history.append({
+            'type': 'deposit', 'amount': float(d.amount),
+            'description': d.description, 'date': d.expense_date,
+            'account_name':  d.savings_account.name  if d.savings_account else '—',
+            'account_color': d.savings_account.color if d.savings_account else '#6c757d',
+        })
+    for w in withdrawals:
+        history.append({
+            'type': 'withdrawal', 'amount': float(w.amount),
+            'description': w.description, 'date': w.income_date,
+            'account_name':  w.savings_account.name  if w.savings_account else '—',
+            'account_color': w.savings_account.color if w.savings_account else '#6c757d',
+        })
+    history.sort(key=lambda x: x['date'], reverse=True)
+
+    return render_template('savings/list.html',
+                           account_data=account_data,
+                           history=history[:50],
+                           today=date.today())
+
+
+@app.route('/savings/add', methods=['POST'])
+@login_required
+@ban_check
+def savings_add():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+    color = (data.get('color') or '#0d6efd').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
+    icon = (data.get('icon') or 'bi-piggy-bank').strip()
+    target = None
+    raw_target = data.get('target_amount')
+    if raw_target not in (None, ''):
+        try:
+            target = float(raw_target)
+            if target <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Неверная целевая сумма'}), 400
+    acc = SavingsAccount(user_id=current_user.id, name=name, color=color,
+                         icon=icon, target_amount=target)
+    try:
+        db.session.add(acc)
+        db.session.commit()
+        return jsonify({'id': acc.id, 'name': acc.name}), 201
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/savings/<int:acc_id>/edit', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def savings_edit(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        name      = request.form.get('name', '').strip()
+        color     = request.form.get('color', '').strip()
+        icon      = request.form.get('icon', 'bi-piggy-bank').strip()
+        raw_target = request.form.get('target_amount', '').strip()
+        if not name:
+            flash('Название обязательно.', 'danger')
+        elif len(name) > 100:
+            flash('Название слишком длинное.', 'danger')
+        elif not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+            flash('Неверный формат цвета.', 'danger')
+        else:
+            target = None
+            if raw_target:
+                try:
+                    target = float(raw_target)
+                    if target <= 0:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    flash('Неверная целевая сумма.', 'danger')
+                    return render_template('savings/form.html', acc=acc)
+            acc.name          = name
+            acc.color         = color
+            acc.icon          = icon
+            acc.target_amount = target
+            db.session.commit()
+            flash('Счёт обновлён!', 'success')
+            return redirect(url_for('savings_list'))
+    return render_template('savings/form.html', acc=acc)
+
+
+@app.route('/savings/<int:acc_id>', methods=['DELETE'])
+@login_required
+def savings_delete(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    tx_count = (Expense.query.filter_by(savings_account_id=acc_id).count() +
+                Income.query.filter_by(savings_account_id=acc_id).count())
+    if tx_count:
+        return jsonify({'error': f'Счёт используется в {tx_count} операциях'}), 409
+    try:
+        db.session.delete(acc)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
 # ─── API ──────────────────────────────────────────────────────────────────────
 
 @app.route('/api/chart-data')
