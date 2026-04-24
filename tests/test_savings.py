@@ -1,6 +1,7 @@
 import datetime
 import pytest
-from app import app as flask_app, db, User, SavingsAccount
+from app import (app as flask_app, db, User, SavingsAccount,
+                 get_account_balance, Category, Expense, Income)
 
 
 @pytest.fixture
@@ -31,3 +32,62 @@ def test_savings_account_model_creation(user_client):
         assert acc.is_active is True
         assert float(acc.target_amount) == 150000.0
         assert acc.icon == 'bi-piggy-bank'
+
+
+# ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def account(user_client):
+    """Returns (client, uid, acc_id) with a fresh SavingsAccount."""
+    client, uid = user_client
+    with flask_app.app_context():
+        acc = SavingsAccount(user_id=uid, name='Test', color='#000000')
+        db.session.add(acc)
+        db.session.commit()
+        acc_id = acc.id
+    return client, uid, acc_id
+
+
+# ─── Balance tests ────────────────────────────────────────────────────────────
+
+def test_balance_empty(account):
+    _, uid, acc_id = account
+    with flask_app.app_context():
+        assert get_account_balance(acc_id) == 0.0
+
+
+def test_balance_after_deposit(account):
+    _, uid, acc_id = account
+    with flask_app.app_context():
+        cat = Category(name='Накопления', icon='bi-piggy-bank', color='#0d6efd')
+        db.session.add(cat)
+        db.session.commit()
+        exp = Expense(
+            user_id=uid, category_id=cat.id, savings_account_id=acc_id,
+            amount=10000, expense_date=datetime.date.today(),
+            is_spent=True, is_planned=False,
+        )
+        db.session.add(exp)
+        db.session.commit()
+        assert get_account_balance(acc_id) == 10000.0
+
+
+def test_balance_after_deposit_and_withdraw(account):
+    _, uid, acc_id = account
+    with flask_app.app_context():
+        cat = Category(name='Накопления', icon='bi-piggy-bank', color='#0d6efd')
+        db.session.add(cat)
+        db.session.commit()
+        exp = Expense(
+            user_id=uid, category_id=cat.id, savings_account_id=acc_id,
+            amount=10000, expense_date=datetime.date.today(),
+            is_spent=True, is_planned=False,
+        )
+        inc = Income(
+            user_id=uid, savings_account_id=acc_id,
+            source='Test', amount=3000,
+            income_date=datetime.date.today(),
+        )
+        db.session.add_all([exp, inc])
+        db.session.commit()
+        assert get_account_balance(acc_id) == 7000.0

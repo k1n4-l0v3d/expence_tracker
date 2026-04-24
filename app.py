@@ -316,6 +316,27 @@ def get_budget_map(user_id: int, year: int, month: int) -> dict:
     return {b.category_id: float(b.amount) for b in budgets}
 
 
+def get_account_balance(account_id: int) -> float:
+    """Deposits are Expense records, withdrawals are Income records."""
+    deposited = db.session.query(
+        func.coalesce(func.sum(Expense.amount), 0)
+    ).filter(Expense.savings_account_id == account_id).scalar()
+    withdrawn = db.session.query(
+        func.coalesce(func.sum(Income.amount), 0)
+    ).filter(Income.savings_account_id == account_id).scalar()
+    return float(deposited) - float(withdrawn)
+
+
+def get_savings_category() -> 'Category':
+    """Return (creating if absent) the global system category «Накопления»."""
+    cat = Category.query.filter_by(name='Накопления', user_id=None).first()
+    if not cat:
+        cat = Category(name='Накопления', icon='bi-piggy-bank', color='#0d6efd', user_id=None)
+        db.session.add(cat)
+        db.session.flush()
+    return cat
+
+
 def months_list():
     return [(m, datetime(2000, m, 1).strftime('%B')) for m in range(1, 13)]
 
