@@ -147,3 +147,79 @@ def test_savings_delete_with_transactions_rejected(account):
         db.session.commit()
     resp = client.delete(f'/savings/{acc_id}')
     assert resp.status_code == 409
+
+
+# ─── Deposit / withdraw tests ─────────────────────────────────────────────────
+
+def test_deposit_creates_expense_and_updates_balance(account):
+    client, uid, acc_id = account
+    today = datetime.date.today().isoformat()
+    resp = client.post(f'/savings/{acc_id}/deposit',
+                       json={'amount': 20000, 'date': today, 'description': 'Первый взнос'},
+                       content_type='application/json')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['ok'] is True
+    assert data['balance'] == 20000.0
+
+    with flask_app.app_context():
+        exp = Expense.query.filter_by(savings_account_id=acc_id).first()
+        assert exp is not None
+        assert float(exp.amount) == 20000.0
+        assert exp.is_spent is True
+        assert exp.is_planned is False
+
+
+def test_withdraw_creates_income_and_updates_balance(account):
+    client, uid, acc_id = account
+    today = datetime.date.today().isoformat()
+    client.post(f'/savings/{acc_id}/deposit',
+                json={'amount': 15000, 'date': today},
+                content_type='application/json')
+    resp = client.post(f'/savings/{acc_id}/withdraw',
+                       json={'amount': 5000, 'date': today},
+                       content_type='application/json')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['balance'] == 10000.0
+
+    with flask_app.app_context():
+        inc = Income.query.filter_by(savings_account_id=acc_id).first()
+        assert inc is not None
+        assert float(inc.amount) == 5000.0
+
+
+def test_withdraw_overdraft_rejected(account):
+    client, uid, acc_id = account
+    today = datetime.date.today().isoformat()
+    client.post(f'/savings/{acc_id}/deposit',
+                json={'amount': 1000, 'date': today},
+                content_type='application/json')
+    resp = client.post(f'/savings/{acc_id}/withdraw',
+                       json={'amount': 9999, 'date': today},
+                       content_type='application/json')
+    assert resp.status_code == 400
+    assert 'Недостаточно средств' in resp.get_json()['error']
+
+
+def test_deposit_invalid_amount_rejected(account):
+    client, uid, acc_id = account
+    resp = client.post(f'/savings/{acc_id}/deposit',
+                       json={'amount': -100, 'date': '2026-04-24'},
+                       content_type='application/json')
+    assert resp.status_code == 400
+
+
+def test_deposit_other_user_returns_404(account):
+    client, uid, acc_id = account
+    with flask_app.app_context():
+        u2 = User(username='other2', email='other2@ex.com', role='user')
+        u2.set_password('pass')
+        db.session.add(u2)
+        db.session.commit()
+    other = flask_app.test_client()
+    other.post('/login', data={'username': 'other2', 'password': 'pass', 'website': ''})
+    resp = other.post(f'/savings/{acc_id}/deposit',
+                      json={'amount': 100, 'date': '2026-04-24'},
+                      content_type='application/json')
+    assert resp.status_code == 404

@@ -1786,6 +1786,84 @@ def savings_delete(acc_id):
         return jsonify({'error': 'Ошибка сервера'}), 500
 
 
+@app.route('/savings/<int:acc_id>/deposit', methods=['POST'])
+@login_required
+@ban_check
+def savings_deposit(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    try:
+        amount = float(data['amount'])
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная сумма'}), 400
+    try:
+        txn_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная дата'}), 400
+    description = (data.get('description') or '').strip() or f'Пополнение: {acc.name}'
+    cat = get_savings_category()
+    exp = Expense(
+        user_id=current_user.id,
+        category_id=cat.id,
+        savings_account_id=acc_id,
+        amount=amount,
+        description=description,
+        expense_date=txn_date,
+        is_planned=False,
+        is_spent=True,
+    )
+    db.session.add(exp)
+    try:
+        db.session.commit()
+        return jsonify({'ok': True, 'balance': get_account_balance(acc_id)})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+@app.route('/savings/<int:acc_id>/withdraw', methods=['POST'])
+@login_required
+@ban_check
+def savings_withdraw(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    try:
+        amount = float(data['amount'])
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная сумма'}), 400
+    try:
+        txn_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная дата'}), 400
+    balance = get_account_balance(acc_id)
+    if amount > balance:
+        return jsonify({'error': f'Недостаточно средств. Баланс: {balance:.2f} ₽'}), 400
+    description = (data.get('description') or '').strip() or None
+    inc = Income(
+        user_id=current_user.id,
+        savings_account_id=acc_id,
+        source=acc.name,
+        amount=amount,
+        description=description,
+        income_date=txn_date,
+    )
+    db.session.add(inc)
+    try:
+        db.session.commit()
+        return jsonify({'ok': True, 'balance': get_account_balance(acc_id)})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
 # ─── API ──────────────────────────────────────────────────────────────────────
 
 @app.route('/api/chart-data')
