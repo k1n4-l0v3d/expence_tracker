@@ -161,6 +161,21 @@ class Category(db.Model):
     user     = db.relationship('User', backref=db.backref('custom_categories', lazy='dynamic'))
 
 
+class SavingsAccount(db.Model):
+    __tablename__ = 'savings_accounts'
+
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name          = db.Column(db.String(100), nullable=False)
+    color         = db.Column(db.String(7),  nullable=False, default='#0d6efd')
+    icon          = db.Column(db.String(50), nullable=False, default='bi-piggy-bank')
+    target_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    is_active     = db.Column(db.Boolean, nullable=False, default=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user = db.relationship('User', backref=db.backref('savings_accounts', lazy='dynamic'))
+
+
 class MonthlyBudget(db.Model):
     __tablename__ = 'monthly_budgets'
 
@@ -186,6 +201,9 @@ class Income(db.Model):
     notes       = db.Column(db.Text)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+    savings_account_id = db.Column(db.Integer, db.ForeignKey('savings_accounts.id'), nullable=True)
+    savings_account    = db.relationship('SavingsAccount', foreign_keys=[savings_account_id])
+
 
 class Expense(db.Model):
     __tablename__ = 'expenses'
@@ -202,6 +220,9 @@ class Expense(db.Model):
     created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                              onupdate=datetime.utcnow)
+
+    savings_account_id = db.Column(db.Integer, db.ForeignKey('savings_accounts.id'), nullable=True)
+    savings_account    = db.relationship('SavingsAccount', foreign_keys=[savings_account_id])
 
     attachments  = db.relationship('ExpenseAttachment', backref='expense',
                                    lazy=True, cascade='all, delete-orphan')
@@ -1821,6 +1842,28 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE expenses ADD COLUMN is_spent BOOLEAN NOT NULL DEFAULT TRUE;"))
             conn.commit()
+    # ── savings_accounts migration ────────────────────────────────
+    if 'savings_account_id' not in exp_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE expenses ADD COLUMN savings_account_id INTEGER NULL "
+                "REFERENCES savings_accounts(id);"
+            ))
+            conn.commit()
+    inc_columns = [c['name'] for c in inspector.get_columns('incomes')]
+    if 'savings_account_id' not in inc_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE incomes ADD COLUMN savings_account_id INTEGER NULL "
+                "REFERENCES savings_accounts(id);"
+            ))
+            conn.commit()
+    # Seed system «Накопления» category
+    if not Category.query.filter_by(name='Накопления', user_id=None).first():
+        db.session.add(Category(
+            name='Накопления', icon='bi-piggy-bank', color='#0d6efd', user_id=None,
+        ))
+        db.session.commit()
 
 if __name__ == '__main__':
     host  = os.getenv('FLASK_HOST', '127.0.0.1')
