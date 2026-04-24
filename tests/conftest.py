@@ -31,12 +31,14 @@ def clean_db():
     """Delete all rows between tests."""
     yield
     with flask_app.app_context():
-        from app import User, Expense, Income, MonthlyBudget, Category, ExpenseAttachment
+        from app import (User, Expense, Income, MonthlyBudget,
+                         Category, ExpenseAttachment, SavingsAccount)
         db.session.query(ExpenseAttachment).delete()
         db.session.query(MonthlyBudget).delete()
         db.session.query(Expense).delete()
         db.session.query(Income).delete()
         db.session.query(Category).delete()
+        db.session.query(SavingsAccount).delete()
         db.session.query(User).delete()
         db.session.commit()
 
