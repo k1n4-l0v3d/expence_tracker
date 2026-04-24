@@ -138,6 +138,54 @@
     </div>
 </div>
 
+{% if savings_data %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-piggy-bank-fill text-primary me-2"></i>Накопления</span>
+        <a href="{{ url_for('savings_list') }}" class="small">все счета →</a>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for item in savings_data %}
+            <div class="col-sm-6 col-lg-4">
+                <div class="border rounded-3 p-3 h-100">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <div class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                             style="width:32px;height:32px;background:{{ item.acc.color }}22">
+                            <i class="bi {{ item.acc.icon }}" style="color:{{ item.acc.color }}"></i>
+                        </div>
+                        <span class="fw-semibold text-truncate">{{ item.acc.name }}</span>
+                    </div>
+                    <div class="fw-bold fs-5 text-success mb-1">{{ "%.2f"|format(item.balance) }} ₽</div>
+                    {% if item.acc.target_amount and item.pct is not none %}
+                    <div class="text-muted small mb-1">
+                        из {{ "%.0f"|format(item.acc.target_amount|float) }} ₽ — {{ item.pct }}%
+                    </div>
+                    <div class="progress mb-2" style="height:5px;border-radius:4px">
+                        <div class="progress-bar"
+                             style="width:{{ item.pct }}%;background:{{ item.acc.color }}"></div>
+                    </div>
+                    {% endif %}
+                    <div class="d-flex gap-1 mt-2">
+                        <button type="button" class="btn btn-outline-success btn-sm flex-fill"
+                                style="font-size:.75rem"
+                                onclick="openSavingsDepositModal({{ item.acc.id }}, '{{ item.acc.name | e }}')">
+                            <i class="bi bi-plus"></i> Пополнить
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm flex-fill"
+                                style="font-size:.75rem"
+                                onclick="openSavingsWithdrawModal({{ item.acc.id }}, '{{ item.acc.name | e }}', {{ item.balance }})">
+                            <i class="bi bi-dash"></i> Снять
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="row g-4">
     <!-- Категории -->
     <div class="col-lg-7">
@@ -318,6 +366,69 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
                 <button type="button" class="btn grad-primary btn-sm" id="savePaymentDays">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Savings deposit modal (dashboard) -->
+<div class="modal fade" id="dashDepositModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-plus-circle text-success me-1"></i>Пополнить:
+                    <span id="dashDepName"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-0">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Сумма *</label>
+                    <input type="number" id="dashDepAmount" class="form-control"
+                           min="0.01" step="0.01">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Дата *</label>
+                    <input type="date" id="dashDepDate" class="form-control">
+                </div>
+                <div id="dashDepError" class="text-danger small d-none"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button class="btn btn-success btn-sm" onclick="submitDashDeposit()">Пополнить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Savings withdraw modal (dashboard) -->
+<div class="modal fade" id="dashWithdrawModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-dash-circle text-danger me-1"></i>Снять:
+                    <span id="dashWitName"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-0">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Сумма *</label>
+                    <input type="number" id="dashWitAmount" class="form-control"
+                           min="0.01" step="0.01">
+                    <div class="text-muted small mt-1">Доступно:
+                        <span id="dashWitBalance"></span> ₽</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Дата *</label>
+                    <input type="date" id="dashWitDate" class="form-control">
+                </div>
+                <div id="dashWitError" class="text-danger small d-none"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button class="btn btn-danger btn-sm" onclick="submitDashWithdraw()">Снять</button>
             </div>
         </div>
     </div>
@@ -590,6 +701,61 @@ document.querySelectorAll('[data-href]').forEach(card => {
         }
     });
 });
+
+// ── Savings modals on dashboard ───────────────────────────────────
+let _dashDepAccId = null, _dashWitAccId = null;
+const _todayIso = new Date().toISOString().slice(0, 10);
+
+function openSavingsDepositModal(accId, name) {
+    _dashDepAccId = accId;
+    document.getElementById('dashDepName').textContent   = name;
+    document.getElementById('dashDepAmount').value       = '';
+    document.getElementById('dashDepDate').value         = _todayIso;
+    document.getElementById('dashDepError').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dashDepositModal')).show();
+}
+
+async function submitDashDeposit() {
+    const amount = document.getElementById('dashDepAmount').value;
+    const date   = document.getElementById('dashDepDate').value;
+    const errEl  = document.getElementById('dashDepError');
+    errEl.classList.add('d-none');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/savings/${_dashDepAccId}/deposit`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({amount: parseFloat(amount), date}),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    location.reload();
+}
+
+function openSavingsWithdrawModal(accId, name, balance) {
+    _dashWitAccId = accId;
+    document.getElementById('dashWitName').textContent    = name;
+    document.getElementById('dashWitBalance').textContent = balance.toFixed(2);
+    document.getElementById('dashWitAmount').value        = '';
+    document.getElementById('dashWitDate').value          = _todayIso;
+    document.getElementById('dashWitError').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dashWithdrawModal')).show();
+}
+
+async function submitDashWithdraw() {
+    const amount = document.getElementById('dashWitAmount').value;
+    const date   = document.getElementById('dashWitDate').value;
+    const errEl  = document.getElementById('dashWitError');
+    errEl.classList.add('d-none');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/savings/${_dashWitAccId}/withdraw`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({amount: parseFloat(amount), date}),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    location.reload();
+}
 
 // ── Карточка «Можно тратить в день» ──────────────────────────────
 (function () {

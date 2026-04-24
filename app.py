@@ -1048,6 +1048,17 @@ def index():
     ).count() > 0
     can_copy = current_empty and (prev_has_expenses or prev_has_income)
 
+    savings_accounts = SavingsAccount.query.filter_by(
+        user_id=uid, is_active=True
+    ).order_by(SavingsAccount.created_at.asc()).all()
+    savings_data = []
+    for acc in savings_accounts:
+        bal = get_account_balance(acc.id)
+        pct = None
+        if acc.target_amount and float(acc.target_amount) > 0:
+            pct = min(round(bal / float(acc.target_amount) * 100, 1), 100.0)
+        savings_data.append({'acc': acc, 'balance': bal, 'pct': pct})
+
     return render_template('index.html',
         summary=summary, budget_map=budget_map,
         total_spent=total_spent, total_income=total_income, balance=balance,
@@ -1056,6 +1067,7 @@ def index():
         salary_day=current_user.salary_day,
         advance_day=current_user.advance_day,
         can_copy=can_copy,
+        savings_data=savings_data,
     )
 
 
