@@ -594,10 +594,12 @@ def profile_export():
     exp_q = Expense.query.filter(
         Expense.user_id == current_user.id,
         extract('year', Expense.expense_date) == year,
+        Expense.savings_account_id.is_(None),
     )
     inc_q = Income.query.filter(
         Income.user_id == current_user.id,
         extract('year', Income.income_date) == year,
+        Income.savings_account_id.is_(None),
     )
     if month:
         exp_q = exp_q.filter(extract('month', Expense.expense_date) == month)
@@ -674,6 +676,49 @@ def profile_export():
         width = max(len(str(cell.value or '')) for cell in col) + 4
         ws_bud.column_dimensions[col[0].column_letter].width = min(width, 40)
 
+    # ── Лист «Накопления» (счета) ─────────────────────────────────
+    sav_accounts = SavingsAccount.query.filter_by(
+        user_id=current_user.id, is_active=True
+    ).order_by(SavingsAccount.name).all()
+
+    ws_sav = wb.create_sheet('Накопления')
+    ws_sav.append(['Название', 'Цвет', 'Иконка', 'Целевая сумма', 'Баланс'])
+    for cell in ws_sav[1]:
+        cell.font = Font(bold=True)
+    for acc in sav_accounts:
+        ws_sav.append([
+            acc.name,
+            acc.color,
+            acc.icon,
+            float(acc.target_amount) if acc.target_amount else '',
+            get_account_balance(acc.id),
+        ])
+    for col in ws_sav.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_sav.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Нак. Операции» (пополнения) ────────────────────────
+    sav_deps = (Expense.query
+                .filter(Expense.user_id == current_user.id,
+                        Expense.savings_account_id.isnot(None))
+                .options(joinedload(Expense.savings_account))
+                .order_by(Expense.expense_date).all())
+
+    ws_sav_ops = wb.create_sheet('Нак. Операции')
+    ws_sav_ops.append(['Дата', 'Счёт', 'Сумма', 'Описание'])
+    for cell in ws_sav_ops[1]:
+        cell.font = Font(bold=True)
+    for dep in sav_deps:
+        ws_sav_ops.append([
+            dep.expense_date.strftime('%d.%m.%Y'),
+            dep.savings_account.name if dep.savings_account else '',
+            float(dep.amount),
+            dep.description or '',
+        ])
+    for col in ws_sav_ops.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_sav_ops.column_dimensions[col[0].column_letter].width = min(width, 40)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -712,7 +757,7 @@ def profile_import():
         flash('Не удалось прочитать файл. Убедитесь, что это корректный .xlsx.', 'danger')
         return redirect(url_for('profile'))
 
-    exp_count = inc_count = skipped = 0
+    exp_count = inc_count = skipped = sav_count = sav_ops_count = 0
 
     # ── Импорт расходов ───────────────────────────────────────────
     if 'Расходы' in wb.sheetnames:
@@ -885,6 +930,101 @@ def profile_import():
                 ))
             bud_count += 1
 
+    # ── Импорт накопительных счетов ──────────────────────────────
+    if 'Накопления' in wb.sheetnames:
+        ws = wb['Накопления']
+        rows = iter(ws.rows)
+        next(rows, None)
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if not vals or not vals[0]:
+                skipped += 1
+                continue
+            name = str(vals[0]).strip()
+            if not name:
+                skipped += 1
+                continue
+            color = str(vals[1]).strip() if len(vals) > 1 and vals[1] else '#0d6efd'
+            if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+                color = '#0d6efd'
+            icon = str(vals[2]).strip() if len(vals) > 2 and vals[2] else 'bi-piggy-bank'
+            target = None
+            if len(vals) > 3 and vals[3]:
+                try:
+                    target = float(vals[3])
+                    if target <= 0:
+                        target = None
+                except (ValueError, TypeError):
+                    target = None
+
+            existing = SavingsAccount.query.filter_by(
+                user_id=current_user.id, name=name
+            ).first()
+            if existing:
+                existing.color         = color
+                existing.icon          = icon
+                existing.target_amount = target
+            else:
+                db.session.add(SavingsAccount(
+                    user_id=current_user.id, name=name,
+                    color=color, icon=icon, target_amount=target,
+                ))
+            sav_count += 1
+
+    # ── Импорт операций накоплений ────────────────────────────────
+    if 'Нак. Операции' in wb.sheetnames:
+        db.session.flush()
+        ws = wb['Нак. Операции']
+        rows = iter(ws.rows)
+        next(rows, None)
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, acc_name_val, amount_val = vals[0], vals[1], vals[2]
+            desc = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+
+            try:
+                dep_date = date_str if isinstance(date_str, date) else \
+                    datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            acc_name_str = str(acc_name_val).strip() if acc_name_val else ''
+            if not acc_name_str:
+                skipped += 1
+                continue
+
+            acc = SavingsAccount.query.filter_by(
+                user_id=current_user.id, name=acc_name_str
+            ).first()
+            if not acc:
+                skipped += 1
+                continue
+
+            cat = get_savings_category()
+            db.session.add(Expense(
+                user_id=current_user.id,
+                category_id=cat.id,
+                savings_account_id=acc.id,
+                amount=amount,
+                description=desc or f'Пополнение: {acc.name}',
+                expense_date=dep_date,
+                is_planned=False,
+                is_spent=True,
+            ))
+            sav_ops_count += 1
+
     try:
         db.session.commit()
     except Exception:
@@ -895,7 +1035,14 @@ def profile_import():
     word_exp = 'расход' if exp_count == 1 else ('расхода' if exp_count < 5 else 'расходов')
     word_inc = 'доход'  if inc_count == 1 else ('дохода'  if inc_count < 5 else 'доходов')
     word_bud = 'запись бюджета' if bud_count == 1 else ('записи бюджета' if bud_count < 5 else 'записей бюджета')
-    msg = f'Импортировано: {exp_count} {word_exp}, {inc_count} {word_inc}, {bud_count} {word_bud}.'
+    parts = [f'{exp_count} {word_exp}', f'{inc_count} {word_inc}', f'{bud_count} {word_bud}']
+    if sav_count:
+        word_sav = 'счёт' if sav_count == 1 else ('счёта' if sav_count < 5 else 'счетов')
+        parts.append(f'{sav_count} {word_sav} накоплений')
+    if sav_ops_count:
+        word_ops = 'операция' if sav_ops_count == 1 else ('операции' if sav_ops_count < 5 else 'операций')
+        parts.append(f'{sav_ops_count} {word_ops} накоплений')
+    msg = 'Импортировано: ' + ', '.join(parts) + '.'
     if skipped:
         msg += f' Пропущено строк: {skipped}.'
     flash(msg, 'success')
