@@ -14,7 +14,13 @@
 
 {% if account_data %}
 {% for item in account_data %}
-<div class="card shadow-sm border-0 mb-3">
+<div class="card shadow-sm border-0 mb-3"
+     id="acc-{{ item.acc.id }}"
+     data-acc="{{ {'id': item.acc.id, 'name': item.acc.name, 'icon': item.acc.icon,
+                   'color': item.acc.color, 'balance': item.balance,
+                   'target': item.acc.target_amount|float if item.acc.target_amount else none,
+                   'pct': item.pct,
+                   'ops': item.recent_ops} | tojson | e }}">
     <div class="card-body">
         <div class="d-flex align-items-center gap-3 mb-2">
             <div class="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
@@ -66,7 +72,7 @@
                 </a>
                 <button type="button" class="btn btn-outline-danger btn-sm"
                         title="Удалить"
-                        onclick="deleteAccount({{ item.acc.id }}, '{{ item.acc.name | e }}')">
+                        onclick="deleteAccount({{ item.acc.id }}, '{{ item.acc.name | e }}', {{ item.tx_count }})">
                     <i class="bi bi-trash"></i>
                 </button>
             </div>
@@ -126,6 +132,29 @@
 {% endblock %}
 
 {% block modals %}
+<!-- Подтверждение удаления -->
+<div class="modal fade" id="deleteAccModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить счёт?</div>
+                <div id="deleteAccName" class="text-muted small mt-1"></div>
+                <div id="deleteAccWarning" class="alert alert-warning small mt-3 mb-0 text-start d-none py-2 px-3">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    <span id="deleteAccWarningText"></span>
+                </div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4"
+                        data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4"
+                        id="deleteAccConfirmBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Добавить счёт -->
 <div class="modal fade" id="addAccountModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -161,6 +190,60 @@
                         data-bs-dismiss="modal">Отмена</button>
                 <button type="button" class="btn grad-primary btn-sm"
                         onclick="submitAddAccount()">Создать</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Детали счёта -->
+<div class="modal fade" id="accDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-1">
+                <div class="d-flex align-items-center gap-2">
+                    <div id="detIconWrap" class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                         style="width:36px;height:36px">
+                        <i id="detIcon" class="bi fs-5"></i>
+                    </div>
+                    <h5 id="detName" class="modal-title fw-bold mb-0"></h5>
+                </div>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="d-flex justify-content-between align-items-end mb-2">
+                    <div>
+                        <div class="text-muted small">Баланс</div>
+                        <div id="detBalance" class="fw-bold fs-3 text-success"></div>
+                    </div>
+                    <div id="detTargetWrap" class="text-end d-none">
+                        <div class="text-muted small">Цель</div>
+                        <div id="detTarget" class="fw-semibold"></div>
+                    </div>
+                </div>
+                <div id="detProgressWrap" class="mb-3 d-none">
+                    <div class="d-flex justify-content-between small text-muted mb-1">
+                        <span>0 ₽</span>
+                        <span id="detPct"></span>
+                        <span id="detTargetLabel"></span>
+                    </div>
+                    <div class="progress" style="height:8px;border-radius:6px">
+                        <div id="detProgressBar" class="progress-bar" role="progressbar"
+                             aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+                <div id="detOpsWrap">
+                    <div class="fw-semibold small text-muted mb-2">Последние операции</div>
+                    <ul id="detOpsList" class="list-group list-group-flush"></ul>
+                </div>
+                <div id="detNoOps" class="text-center text-muted small py-2 d-none">Операций пока нет</div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-success btn-sm"
+                        id="detDepBtn"><i class="bi bi-plus-circle me-1"></i>Пополнить</button>
+                <button type="button" class="btn btn-outline-danger btn-sm"
+                        id="detWitBtn"><i class="bi bi-dash-circle me-1"></i>Снять</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-auto"
+                        data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>
     </div>
@@ -319,15 +402,128 @@ async function submitWithdraw() {
     location.reload();
 }
 
-async function deleteAccount(accId, name) {
-    if (!confirm(`Удалить счёт «${name}»? Это действие нельзя отменить.`)) return;
-    const res = await fetch(`/savings/${accId}`, {
+function openDetailModal(accId) {
+    const card = document.getElementById(`acc-${accId}`);
+    if (!card) return;
+    const acc = JSON.parse(card.dataset.acc);
+
+    // header
+    document.getElementById('detName').textContent = acc.name;
+    const iconWrap = document.getElementById('detIconWrap');
+    iconWrap.style.background = acc.color + '22';
+    const iconEl = document.getElementById('detIcon');
+    iconEl.className = `bi ${acc.icon} fs-5`;
+    iconEl.style.color = acc.color;
+
+    // balance
+    document.getElementById('detBalance').textContent = acc.balance.toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' ₽';
+
+    // target + progress
+    if (acc.target) {
+        document.getElementById('detTargetWrap').classList.remove('d-none');
+        document.getElementById('detTarget').textContent = acc.target.toLocaleString('ru-RU') + ' ₽';
+        document.getElementById('detProgressWrap').classList.remove('d-none');
+        const pct = acc.pct ?? 0;
+        document.getElementById('detPct').textContent = pct + '% достигнуто';
+        document.getElementById('detTargetLabel').textContent = acc.target.toLocaleString('ru-RU') + ' ₽';
+        const bar = document.getElementById('detProgressBar');
+        bar.style.width = pct + '%';
+        bar.style.background = acc.color;
+        bar.setAttribute('aria-valuenow', pct);
+    } else {
+        document.getElementById('detTargetWrap').classList.add('d-none');
+        document.getElementById('detProgressWrap').classList.add('d-none');
+    }
+
+    // ops
+    const list = document.getElementById('detOpsList');
+    list.innerHTML = '';
+    if (acc.ops && acc.ops.length) {
+        document.getElementById('detOpsWrap').classList.remove('d-none');
+        document.getElementById('detNoOps').classList.add('d-none');
+        acc.ops.forEach(op => {
+            const isDeposit = op.type === 'deposit';
+            const li = document.createElement('li');
+            li.className = 'list-group-item px-0 py-2 d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+                <div class="d-flex align-items-center gap-2">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+                         style="width:26px;height:26px;background:${isDeposit ? '#d1fae5' : '#fee2e2'}">
+                        <i class="bi ${isDeposit ? 'bi-arrow-down text-success' : 'bi-arrow-up text-danger'}" style="font-size:.8rem"></i>
+                    </div>
+                    <div>
+                        <div class="small fw-semibold">${op.description}</div>
+                        <div class="text-muted" style="font-size:.72rem">${op.date}</div>
+                    </div>
+                </div>
+                <span class="fw-semibold small ${isDeposit ? 'text-danger' : 'text-success'}">
+                    ${isDeposit ? '−' : '+'}${op.amount.toLocaleString('ru-RU', {minimumFractionDigits: 2})} ₽
+                </span>`;
+            list.appendChild(li);
+        });
+    } else {
+        document.getElementById('detOpsWrap').classList.add('d-none');
+        document.getElementById('detNoOps').classList.remove('d-none');
+    }
+
+    // wire deposit/withdraw buttons
+    document.getElementById('detDepBtn').onclick = () => {
+        bootstrap.Modal.getInstance(document.getElementById('accDetailModal'))?.hide();
+        document.getElementById('accDetailModal').addEventListener('hidden.bs.modal', () => {
+            openDepositModal(acc.id, acc.name, acc.balance);
+        }, {once: true});
+    };
+    document.getElementById('detWitBtn').onclick = () => {
+        bootstrap.Modal.getInstance(document.getElementById('accDetailModal'))?.hide();
+        document.getElementById('accDetailModal').addEventListener('hidden.bs.modal', () => {
+            openWithdrawModal(acc.id, acc.name, acc.balance);
+        }, {once: true});
+    };
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('accDetailModal')).show();
+}
+
+// Auto-open modal if ?acc= param is in URL
+(function () {
+    const params = new URLSearchParams(window.location.search);
+    const accId  = parseInt(params.get('acc'));
+    if (accId) {
+        window.addEventListener('DOMContentLoaded', () => {
+            const card = document.getElementById(`acc-${accId}`);
+            if (card) card.scrollIntoView({behavior: 'smooth', block: 'center'});
+            setTimeout(() => openDetailModal(accId), 300);
+        });
+    }
+})();
+
+let _deleteAccId = null;
+
+function deleteAccount(accId, name, txCount) {
+    _deleteAccId = accId;
+    document.getElementById('deleteAccName').textContent = `«${name}»`;
+    const warningEl  = document.getElementById('deleteAccWarning');
+    const warningTxt = document.getElementById('deleteAccWarningText');
+    if (txCount > 0) {
+        const word = txCount === 1 ? 'операция' : txCount < 5 ? 'операции' : 'операций';
+        warningTxt.textContent = `Вместе со счётом будут удалены все операции (${txCount} ${word}). Это действие нельзя отменить.`;
+        warningEl.classList.remove('d-none');
+    } else {
+        warningTxt.textContent = '';
+        warningEl.classList.add('d-none');
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteAccModal')).show();
+}
+
+document.getElementById('deleteAccConfirmBtn').addEventListener('click', async () => {
+    if (!_deleteAccId) return;
+    bootstrap.Modal.getInstance(document.getElementById('deleteAccModal'))?.hide();
+    const res = await fetch(`/savings/${_deleteAccId}`, {
         method: 'DELETE',
         headers: {'X-CSRFToken': csrfToken},
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error); return; }
     location.reload();
-}
+});
 </script>
 {% endblock %}

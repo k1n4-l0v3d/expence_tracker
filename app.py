@@ -279,6 +279,7 @@ def get_monthly_income(user_id: int, year: int, month: int) -> float:
         Income.user_id == user_id,
         extract('year',  Income.income_date) == year,
         extract('month', Income.income_date) == month,
+        Income.savings_account_id.is_(None),
     ).scalar()
     return float(total)
 
@@ -317,14 +318,11 @@ def get_budget_map(user_id: int, year: int, month: int) -> dict:
 
 
 def get_account_balance(account_id: int) -> float:
-    """Deposits are Expense records, withdrawals are Income records."""
-    deposited = db.session.query(
+    """Balance = sum of remaining deposit Expense records for the account."""
+    total = db.session.query(
         func.coalesce(func.sum(Expense.amount), 0)
     ).filter(Expense.savings_account_id == account_id).scalar()
-    withdrawn = db.session.query(
-        func.coalesce(func.sum(Income.amount), 0)
-    ).filter(Income.savings_account_id == account_id).scalar()
-    return float(deposited) - float(withdrawn)
+    return float(total)
 
 
 def get_savings_category() -> 'Category':
@@ -516,7 +514,8 @@ def profile():
     total_expenses = db.session.query(func.coalesce(func.sum(Expense.amount), 0))\
         .filter(Expense.user_id == current_user.id).scalar()
     total_income = db.session.query(func.coalesce(func.sum(Income.amount), 0))\
-        .filter(Income.user_id == current_user.id).scalar()
+        .filter(Income.user_id == current_user.id,
+                Income.savings_account_id.is_(None)).scalar()
     expense_count = Expense.query.filter_by(user_id=current_user.id).count()
     income_count  = Income.query.filter_by(user_id=current_user.id).count()
 
@@ -1580,6 +1579,7 @@ def income_list():
             Income.user_id == uid,
             extract('year',  Income.income_date) == year,
             extract('month', Income.income_date) == month,
+            Income.savings_account_id.is_(None),
         )
         .order_by(Income.income_date.desc(), Income.created_at.desc()).all()
     )
@@ -1677,7 +1677,30 @@ def savings_list():
         pct = None
         if acc.target_amount and float(acc.target_amount) > 0:
             pct = min(round(balance / float(acc.target_amount) * 100, 1), 100.0)
-        account_data.append({'acc': acc, 'balance': balance, 'tx_count': tx_count, 'pct': pct})
+        recent_ops = []
+        for d in (Expense.query.filter_by(savings_account_id=acc.id)
+                  .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+                  .limit(5).all()):
+            recent_ops.append({
+                'type': 'deposit',
+                'amount': float(d.amount),
+                'description': d.description or 'Пополнение',
+                'date': d.expense_date.strftime('%d.%m.%Y'),
+            })
+        for w in (Income.query.filter_by(savings_account_id=acc.id)
+                  .order_by(Income.income_date.desc(), Income.created_at.desc())
+                  .limit(5).all()):
+            recent_ops.append({
+                'type': 'withdrawal',
+                'amount': float(w.amount),
+                'description': w.description or 'Снятие',
+                'date': w.income_date.strftime('%d.%m.%Y'),
+            })
+        recent_ops.sort(key=lambda x: x['date'], reverse=True)
+        account_data.append({
+            'acc': acc, 'balance': balance, 'tx_count': tx_count,
+            'pct': pct, 'recent_ops': recent_ops[:5],
+        })
 
     deposits = (Expense.query
                 .filter(Expense.user_id == uid, Expense.savings_account_id.isnot(None))
@@ -1703,10 +1726,13 @@ def savings_list():
         })
     history.sort(key=lambda x: x['date'], reverse=True)
 
+    open_acc_id = request.args.get('acc', type=int)
+
     return render_template('savings/list.html',
                            account_data=account_data,
                            history=history[:50],
-                           today=date.today())
+                           today=date.today(),
+                           open_acc_id=open_acc_id)
 
 
 @app.route('/savings/add', methods=['POST'])
@@ -1785,11 +1811,9 @@ def savings_edit(acc_id):
 @login_required
 def savings_delete(acc_id):
     acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
-    tx_count = (Expense.query.filter_by(savings_account_id=acc_id).count() +
-                Income.query.filter_by(savings_account_id=acc_id).count())
-    if tx_count:
-        return jsonify({'error': f'Счёт используется в {tx_count} операциях'}), 409
     try:
+        Expense.query.filter_by(savings_account_id=acc_id).delete()
+        Income.query.filter_by(savings_account_id=acc_id).delete()
         db.session.delete(acc)
         db.session.commit()
         return jsonify({'ok': True})
@@ -1852,22 +1876,27 @@ def savings_withdraw(acc_id):
     except (ValueError, KeyError, TypeError):
         return jsonify({'error': 'Неверная сумма'}), 400
     try:
-        txn_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+        datetime.strptime(data['date'], '%Y-%m-%d').date()
     except (ValueError, KeyError, TypeError):
         return jsonify({'error': 'Неверная дата'}), 400
     balance = get_account_balance(acc_id)
     if amount > balance:
         return jsonify({'error': f'Недостаточно средств. Баланс: {balance:.2f} ₽'}), 400
-    description = (data.get('description') or '').strip() or None
-    inc = Income(
-        user_id=current_user.id,
-        savings_account_id=acc_id,
-        source=acc.name,
-        amount=amount,
-        description=description,
-        income_date=txn_date,
-    )
-    db.session.add(inc)
+    # Reduce deposit expenses FIFO (oldest first)
+    deposits = Expense.query.filter_by(
+        savings_account_id=acc_id
+    ).order_by(Expense.expense_date.asc(), Expense.created_at.asc()).all()
+    remaining = amount
+    for dep in deposits:
+        if remaining <= 0:
+            break
+        dep_amount = float(dep.amount)
+        if dep_amount <= remaining:
+            remaining -= dep_amount
+            db.session.delete(dep)
+        else:
+            dep.amount = round(dep_amount - remaining, 2)
+            remaining = 0
     try:
         db.session.commit()
         return jsonify({'ok': True, 'balance': get_account_balance(acc_id)})
@@ -1984,6 +2013,7 @@ def stats_data():
             Income.user_id == uid,
             extract('year',  Income.income_date) == cy,
             extract('month', Income.income_date) == cm,
+            Income.savings_account_id.is_(None),
         ).scalar())
         exp = float(db.session.query(
             func.coalesce(func.sum(Expense.amount), 0)

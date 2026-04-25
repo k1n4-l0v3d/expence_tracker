@@ -148,7 +148,10 @@
         <div class="row g-3">
             {% for item in savings_data %}
             <div class="col-sm-6 col-lg-4">
-                <div class="border rounded-3 p-3 h-100">
+                <div class="border rounded-3 p-3 h-100 savings-dash-card"
+                     role="button" tabindex="0"
+                     onclick="savingsDashCardClick(event, {{ item.acc.id }})"
+                     onkeydown="if(event.key==='Enter'){savingsDashCardClick(event,{{ item.acc.id }})}">
                     <div class="d-flex align-items-center gap-2 mb-2">
                         <div class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                              style="width:32px;height:32px;background:{{ item.acc.color }}22">
@@ -166,7 +169,7 @@
                              style="width:{{ item.pct }}%;background:{{ item.acc.color }}"></div>
                     </div>
                     {% endif %}
-                    <div class="d-flex gap-1 mt-2">
+                    <div class="d-flex gap-1 mt-2" onclick="event.stopPropagation()">
                         <button type="button" class="btn btn-outline-success btn-sm flex-fill"
                                 style="font-size:.75rem"
                                 onclick="openSavingsDepositModal({{ item.acc.id }}, '{{ item.acc.name | e }}')">
@@ -252,7 +255,7 @@
                             <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
                                 {{ exp.category.name }}
                             </span>
-                            {% if not exp.is_planned %}
+                            {% if not exp.is_planned and not exp.savings_account %}
                                 <span class="badge bg-warning text-dark ms-1">незаплан.</span>
                             {% endif %}
                             <div class="small text-muted mt-1">{{ exp.description or '—' }}</div>
@@ -702,15 +705,49 @@ document.querySelectorAll('[data-href]').forEach(card => {
     });
 });
 
+// ── Savings card hover style ─────────────────────────────────────
+(function () {
+    const style = document.createElement('style');
+    style.textContent = `
+        .savings-dash-card {
+            transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+            cursor: pointer;
+        }
+        .savings-dash-card:hover {
+            transform: translateY(-3px) scale(1.015);
+            box-shadow: 0 6px 20px rgba(0,0,0,.13);
+            border-color: #0d6efd55 !important;
+        }
+        [data-bs-theme="dark"] .savings-dash-card:hover {
+            box-shadow: 0 6px 20px rgba(0,0,0,.4);
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+function savingsDashCardClick(event, accId) {
+    if (event.target.closest('button')) return;
+    window.location.href = `/savings?acc=${accId}`;
+}
+
 // ── Savings modals on dashboard ───────────────────────────────────
 let _dashDepAccId = null, _dashWitAccId = null;
-const _todayIso = new Date().toISOString().slice(0, 10);
+
+(function () {
+    const viewYear  = {{ year }};
+    const viewMonth = {{ month }};
+    const now       = new Date();
+    const isCurrentMonth = (now.getFullYear() === viewYear && now.getMonth() + 1 === viewMonth);
+    window._dashDefaultDate = isCurrentMonth
+        ? now.toISOString().slice(0, 10)
+        : `${viewYear}-${String(viewMonth).padStart(2, '0')}-01`;
+})();
 
 function openSavingsDepositModal(accId, name) {
     _dashDepAccId = accId;
     document.getElementById('dashDepName').textContent   = name;
     document.getElementById('dashDepAmount').value       = '';
-    document.getElementById('dashDepDate').value         = _todayIso;
+    document.getElementById('dashDepDate').value         = _dashDefaultDate;
     document.getElementById('dashDepError').classList.add('d-none');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('dashDepositModal')).show();
 }
@@ -736,7 +773,7 @@ function openSavingsWithdrawModal(accId, name, balance) {
     document.getElementById('dashWitName').textContent    = name;
     document.getElementById('dashWitBalance').textContent = balance.toFixed(2);
     document.getElementById('dashWitAmount').value        = '';
-    document.getElementById('dashWitDate').value          = _todayIso;
+    document.getElementById('dashWitDate').value          = _dashDefaultDate;
     document.getElementById('dashWitError').classList.add('d-none');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('dashWithdrawModal')).show();
 }

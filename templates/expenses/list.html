@@ -86,7 +86,7 @@ function openExpenseDetail(el) {
 
     const badgesEl = _detailModalEl.querySelector('#edBadges');
     badgesEl.innerHTML = '';
-    if (!exp.is_planned) {
+    if (!exp.is_planned && !exp.is_savings) {
         badgesEl.innerHTML += '<span class="badge bg-warning-subtle text-warning border border-warning">незапланированный</span>';
     }
     if (!exp.is_spent) {
@@ -588,13 +588,14 @@ async function handleAttachmentUpload(input) {
                 "amount": "{{ '%.2f'|format(exp.amount|float) }}",
                 "date": "{{ exp.expense_date.strftime('%d.%m.%Y') }}",
                 "is_planned": {{ exp.is_planned | tojson }},
-                "is_spent": {{ exp.is_spent | tojson }}
+                "is_spent": {{ exp.is_spent | tojson }},
+                "is_savings": {{ (exp.savings_account_id is not none) | tojson }}
              }'>
             <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                 <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
                     <i class="bi {{ exp.category.icon }} me-1"></i>{{ exp.category.name }}
                 </span>
-                {% if not exp.is_planned %}
+                {% if not exp.is_planned and not exp.savings_account %}
                     <span class="badge bg-warning-subtle text-warning" style="font-size:.7rem">незаплан.</span>
                 {% endif %}
                 {% if not exp.is_spent %}

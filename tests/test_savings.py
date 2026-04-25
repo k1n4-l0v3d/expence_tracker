@@ -80,15 +80,10 @@ def test_balance_after_deposit_and_withdraw(account):
         db.session.commit()
         exp = Expense(
             user_id=uid, category_id=cat.id, savings_account_id=acc_id,
-            amount=10000, expense_date=datetime.date.today(),
+            amount=7000, expense_date=datetime.date.today(),
             is_spent=True, is_planned=False,
         )
-        inc = Income(
-            user_id=uid, savings_account_id=acc_id,
-            source='Test', amount=3000,
-            income_date=datetime.date.today(),
-        )
-        db.session.add_all([exp, inc])
+        db.session.add(exp)
         db.session.commit()
         assert get_account_balance(acc_id) == 7000.0
 
@@ -132,7 +127,7 @@ def test_savings_delete_empty_account(user_client):
     assert resp.get_json()['ok'] is True
 
 
-def test_savings_delete_with_transactions_rejected(account):
+def test_savings_delete_with_transactions_cascades(account):
     client, uid, acc_id = account
     with flask_app.app_context():
         cat = Category(name='Накопления', icon='bi-piggy-bank', color='#0d6efd')
@@ -146,7 +141,11 @@ def test_savings_delete_with_transactions_rejected(account):
         db.session.add(exp)
         db.session.commit()
     resp = client.delete(f'/savings/{acc_id}')
-    assert resp.status_code == 409
+    assert resp.status_code == 200
+    assert resp.get_json()['ok'] is True
+    with flask_app.app_context():
+        assert SavingsAccount.query.get(acc_id) is None
+        assert Expense.query.filter_by(savings_account_id=acc_id).count() == 0
 
 
 # ─── Deposit / withdraw tests ─────────────────────────────────────────────────
@@ -170,7 +169,7 @@ def test_deposit_creates_expense_and_updates_balance(account):
         assert exp.is_planned is False
 
 
-def test_withdraw_creates_income_and_updates_balance(account):
+def test_withdraw_reduces_expense_amount(account):
     client, uid, acc_id = account
     today = datetime.date.today().isoformat()
     client.post(f'/savings/{acc_id}/deposit',
@@ -180,13 +179,32 @@ def test_withdraw_creates_income_and_updates_balance(account):
                        json={'amount': 5000, 'date': today},
                        content_type='application/json')
     assert resp.status_code == 200
-    data = resp.get_json()
-    assert data['balance'] == 10000.0
+    assert resp.get_json()['balance'] == 10000.0
 
     with flask_app.app_context():
+        exp = Expense.query.filter_by(savings_account_id=acc_id).first()
+        assert exp is not None
+        assert float(exp.amount) == 10000.0
+        # No income record created
         inc = Income.query.filter_by(savings_account_id=acc_id).first()
-        assert inc is not None
-        assert float(inc.amount) == 5000.0
+        assert inc is None
+
+
+def test_withdraw_full_amount_deletes_expense(account):
+    client, uid, acc_id = account
+    today = datetime.date.today().isoformat()
+    client.post(f'/savings/{acc_id}/deposit',
+                json={'amount': 10000, 'date': today},
+                content_type='application/json')
+    resp = client.post(f'/savings/{acc_id}/withdraw',
+                       json={'amount': 10000, 'date': today},
+                       content_type='application/json')
+    assert resp.status_code == 200
+    assert resp.get_json()['balance'] == 0.0
+
+    with flask_app.app_context():
+        exp = Expense.query.filter_by(savings_account_id=acc_id).first()
+        assert exp is None
 
 
 def test_withdraw_overdraft_rejected(account):
