@@ -6,10 +6,9 @@
     <h4 class="mb-0 fw-bold">
         <i class="bi bi-piggy-bank-fill text-primary me-2"></i>Накопительные счета
     </h4>
-    <button type="button" class="btn grad-primary btn-sm pulse-btn"
-            data-bs-toggle="modal" data-bs-target="#addAccountModal">
+    <a href="{{ url_for('savings_new') }}" class="btn grad-primary btn-sm pulse-btn">
         <i class="bi bi-plus-lg me-1"></i>Новый счёт
-    </button>
+    </a>
 </div>
 
 {% if account_data %}
@@ -19,14 +18,21 @@
      data-acc="{{ {'id': item.acc.id, 'name': item.acc.name, 'icon': item.acc.icon,
                    'color': item.acc.color, 'balance': item.balance,
                    'target': item.acc.target_amount|float if item.acc.target_amount else none,
-                   'pct': item.pct,
-                   'ops': item.recent_ops} | tojson | e }}">
+                   'pct': item.pct, 'ops': item.recent_ops,
+                   'has_image': item.acc.image_data is not none,
+                   'img_url': url_for('savings_image', acc_id=item.acc.id) if item.acc.image_data else ''} | tojson | e }}">
     <div class="card-body">
         <div class="d-flex align-items-center gap-3 mb-2">
+            {% if item.acc.image_data %}
+            <img src="{{ url_for('savings_image', acc_id=item.acc.id) }}"
+                 class="rounded-3 flex-shrink-0"
+                 style="width:44px;height:44px;object-fit:cover">
+            {% else %}
             <div class="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
                  style="width:44px;height:44px;background:{{ item.acc.color }}22">
                 <i class="bi {{ item.acc.icon }} fs-4" style="color:{{ item.acc.color }}"></i>
             </div>
+            {% endif %}
             <div class="flex-grow-1" style="min-width:0">
                 <div class="fw-bold fs-5">{{ item.acc.name }}</div>
                 <div class="text-muted small">
@@ -84,10 +90,9 @@
 <div class="text-center text-muted py-5">
     <i class="bi bi-piggy-bank" style="font-size:3rem;opacity:.3"></i>
     <div class="mt-2">Накопительных счетов пока нет</div>
-    <button type="button" class="btn grad-primary btn-sm mt-3"
-            data-bs-toggle="modal" data-bs-target="#addAccountModal">
+    <a href="{{ url_for('savings_new') }}" class="btn grad-primary btn-sm mt-3">
         <i class="bi bi-plus-lg me-1"></i>Создать первый счёт
-    </button>
+    </a>
 </div>
 {% endif %}
 
@@ -150,46 +155,6 @@
                         data-bs-dismiss="modal">Отмена</button>
                 <button type="button" class="btn btn-danger btn-sm px-4"
                         id="deleteAccConfirmBtn">Удалить</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Добавить счёт -->
-<div class="modal fade" id="addAccountModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header border-0">
-                <h5 class="modal-title fw-semibold">
-                    <i class="bi bi-piggy-bank text-primary me-2"></i>Новый счёт
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body pt-0">
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Название *</label>
-                    <input type="text" id="accName" class="form-control" maxlength="100"
-                           placeholder="Отпуск, Машина…">
-                </div>
-                <div class="row g-3 mb-3">
-                    <div class="col">
-                        <label class="form-label small fw-semibold">Цвет</label>
-                        <input type="color" id="accColor" class="form-control form-control-color w-100"
-                               value="#0d6efd">
-                    </div>
-                    <div class="col">
-                        <label class="form-label small fw-semibold">Целевая сумма</label>
-                        <input type="number" id="accTarget" class="form-control"
-                               min="1" placeholder="необязательно">
-                    </div>
-                </div>
-                <div id="addAccError" class="text-danger small d-none"></div>
-            </div>
-            <div class="modal-footer border-0 pt-0">
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        data-bs-dismiss="modal">Отмена</button>
-                <button type="button" class="btn grad-primary btn-sm"
-                        onclick="submitAddAccount()">Создать</button>
             </div>
         </div>
     </div>
@@ -331,23 +296,6 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 const todayStr  = '{{ today.isoformat() }}';
 let _depAccId = null, _witAccId = null;
 
-async function submitAddAccount() {
-    const name   = document.getElementById('accName').value.trim();
-    const color  = document.getElementById('accColor').value;
-    const target = document.getElementById('accTarget').value.trim();
-    const errEl  = document.getElementById('addAccError');
-    errEl.classList.add('d-none');
-    const body = {name, color};
-    if (target) body.target_amount = parseFloat(target);
-    const res = await fetch('/savings/add', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-        body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
-    location.reload();
-}
 
 function openDepositModal(accId, name, balance) {
     _depAccId = accId;
@@ -407,13 +355,19 @@ function openDetailModal(accId) {
     if (!card) return;
     const acc = JSON.parse(card.dataset.acc);
 
-    // header
+    // header — photo or icon
     document.getElementById('detName').textContent = acc.name;
     const iconWrap = document.getElementById('detIconWrap');
-    iconWrap.style.background = acc.color + '22';
-    const iconEl = document.getElementById('detIcon');
-    iconEl.className = `bi ${acc.icon} fs-5`;
-    iconEl.style.color = acc.color;
+    const iconEl   = document.getElementById('detIcon');
+    if (acc.has_image && acc.img_url) {
+        iconWrap.style.background = 'transparent';
+        iconWrap.innerHTML = `<img src="${acc.img_url}" class="rounded-2"
+            style="width:36px;height:36px;object-fit:cover">`;
+    } else {
+        iconWrap.style.background = acc.color + '22';
+        iconEl.className = `bi ${acc.icon} fs-5`;
+        iconEl.style.color = acc.color;
+    }
 
     // balance
     document.getElementById('detBalance').textContent = acc.balance.toLocaleString('ru-RU', {minimumFractionDigits: 2}) + ' ₽';

@@ -153,10 +153,16 @@
                      onclick="savingsDashCardClick(event, {{ item.acc.id }})"
                      onkeydown="if(event.key==='Enter'){savingsDashCardClick(event,{{ item.acc.id }})}">
                     <div class="d-flex align-items-center gap-2 mb-2">
+                        {% if item.acc.image_data %}
+                        <img src="{{ url_for('savings_image', acc_id=item.acc.id) }}"
+                             class="rounded-2 flex-shrink-0"
+                             style="width:32px;height:32px;object-fit:cover">
+                        {% else %}
                         <div class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
                              style="width:32px;height:32px;background:{{ item.acc.color }}22">
                             <i class="bi {{ item.acc.icon }}" style="color:{{ item.acc.color }}"></i>
                         </div>
+                        {% endif %}
                         <span class="fw-semibold text-truncate">{{ item.acc.name }}</span>
                     </div>
                     <div class="fw-bold fs-5 text-success mb-1">{{ "%.2f"|format(item.balance) }} ₽</div>

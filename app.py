@@ -172,6 +172,8 @@ class SavingsAccount(db.Model):
     target_amount = db.Column(db.Numeric(12, 2), nullable=True)
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    image_data    = db.Column(db.LargeBinary, nullable=True)
+    image_mime    = db.Column(db.String(50),  nullable=True)
 
     user = db.relationship('User', backref=db.backref('savings_accounts', lazy='dynamic'))
 
@@ -1660,6 +1662,77 @@ def income_delete(inc_id):
 
 # ─── Накопительные счета ──────────────────────────────────────────────────────
 
+SAVINGS_ICONS = [
+    ('bi-piggy-bank',       'Копилка'),
+    ('bi-airplane',         'Путешествие'),
+    ('bi-car-front',        'Авто'),
+    ('bi-house',            'Жильё'),
+    ('bi-laptop',           'Техника'),
+    ('bi-phone',            'Телефон'),
+    ('bi-heart-pulse',      'Здоровье'),
+    ('bi-book',             'Образование'),
+    ('bi-shield',           'Подушка'),
+    ('bi-gift',             'Подарок'),
+    ('bi-music-note-beamed','Хобби'),
+    ('bi-bicycle',          'Спорт'),
+    ('bi-bag',              'Шопинг'),
+    ('bi-bank2',            'Вклад'),
+    ('bi-cash-coin',        'Деньги'),
+    ('bi-heart',            'Любовь'),
+    ('bi-stars',            'Мечта'),
+    ('bi-tools',            'Ремонт'),
+    ('bi-camera',           'Фото'),
+    ('bi-fire',             'Срочное'),
+]
+
+MAX_SAVINGS_IMAGE = 2 * 1024 * 1024  # 2 MB
+
+
+def _parse_savings_form(form, files, acc=None):
+    """Parse create/edit form, return dict of fields or None on error (sets flash)."""
+    name = form.get('name', '').strip()
+    if not name:
+        flash('Название обязательно.', 'danger')
+        return None
+    if len(name) > 100:
+        flash('Название слишком длинное.', 'danger')
+        return None
+    color = form.get('color', '#0d6efd').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        color = '#0d6efd'
+    icon = form.get('icon', 'bi-piggy-bank').strip() or 'bi-piggy-bank'
+    raw_target = form.get('target_amount', '').strip()
+    target = None
+    if raw_target:
+        try:
+            target = float(raw_target)
+            if target <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            flash('Неверная целевая сумма.', 'danger')
+            return None
+    image_data = image_mime = None
+    if form.get('clear_image') == '1':
+        image_data, image_mime = None, None
+    else:
+        f = files.get('image')
+        if f and f.filename:
+            mime = f.mimetype or ''
+            if not mime.startswith('image/'):
+                flash('Допускаются только изображения.', 'danger')
+                return None
+            data = f.read()
+            if len(data) > MAX_SAVINGS_IMAGE:
+                flash('Изображение слишком большое (макс. 2 МБ).', 'danger')
+                return None
+            image_data, image_mime = data, mime
+        elif acc:
+            image_data = acc.image_data
+            image_mime = acc.image_mime
+    return {'name': name, 'color': color, 'icon': icon, 'target': target,
+            'image_data': image_data, 'image_mime': image_mime}
+
+
 @app.route('/savings')
 @login_required
 @ban_check
@@ -1771,40 +1844,61 @@ def savings_add():
         return jsonify({'error': 'Ошибка сервера'}), 500
 
 
+@app.route('/savings/new', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def savings_new():
+    if request.method == 'POST':
+        fields = _parse_savings_form(request.form, request.files)
+        if fields is None:
+            return render_template('savings/form.html', acc=None,
+                                   savings_icons=SAVINGS_ICONS)
+        acc = SavingsAccount(
+            user_id=current_user.id,
+            name=fields['name'], color=fields['color'], icon=fields['icon'],
+            target_amount=fields['target'],
+            image_data=fields['image_data'], image_mime=fields['image_mime'],
+        )
+        db.session.add(acc)
+        db.session.commit()
+        flash('Счёт создан!', 'success')
+        return redirect(url_for('savings_list'))
+    return render_template('savings/form.html', acc=None, savings_icons=SAVINGS_ICONS)
+
+
 @app.route('/savings/<int:acc_id>/edit', methods=['GET', 'POST'])
 @login_required
 @ban_check
 def savings_edit(acc_id):
     acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
     if request.method == 'POST':
-        name      = request.form.get('name', '').strip()
-        color     = request.form.get('color', '').strip()
-        icon      = request.form.get('icon', 'bi-piggy-bank').strip()
-        raw_target = request.form.get('target_amount', '').strip()
-        if not name:
-            flash('Название обязательно.', 'danger')
-        elif len(name) > 100:
-            flash('Название слишком длинное.', 'danger')
-        elif not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
-            flash('Неверный формат цвета.', 'danger')
-        else:
-            target = None
-            if raw_target:
-                try:
-                    target = float(raw_target)
-                    if target <= 0:
-                        raise ValueError
-                except (ValueError, TypeError):
-                    flash('Неверная целевая сумма.', 'danger')
-                    return render_template('savings/form.html', acc=acc)
-            acc.name          = name
-            acc.color         = color
-            acc.icon          = icon
-            acc.target_amount = target
-            db.session.commit()
-            flash('Счёт обновлён!', 'success')
-            return redirect(url_for('savings_list'))
-    return render_template('savings/form.html', acc=acc)
+        fields = _parse_savings_form(request.form, request.files, acc=acc)
+        if fields is None:
+            return render_template('savings/form.html', acc=acc,
+                                   savings_icons=SAVINGS_ICONS)
+        acc.name          = fields['name']
+        acc.color         = fields['color']
+        acc.icon          = fields['icon']
+        acc.target_amount = fields['target']
+        acc.image_data    = fields['image_data']
+        acc.image_mime    = fields['image_mime']
+        db.session.commit()
+        flash('Счёт обновлён!', 'success')
+        return redirect(url_for('savings_list'))
+    return render_template('savings/form.html', acc=acc, savings_icons=SAVINGS_ICONS)
+
+
+@app.route('/savings/<int:acc_id>/image')
+@login_required
+def savings_image(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    if not acc.image_data:
+        abort(404)
+    return send_file(
+        io.BytesIO(acc.image_data),
+        mimetype=acc.image_mime,
+        max_age=3600,
+    )
 
 
 @app.route('/savings/<int:acc_id>', methods=['DELETE'])
@@ -2138,6 +2232,16 @@ with app.app_context():
                 "ALTER TABLE incomes ADD COLUMN savings_account_id INTEGER NULL "
                 "REFERENCES savings_accounts(id);"
             ))
+            conn.commit()
+    # savings_accounts: image columns
+    sav_columns = [c['name'] for c in inspector.get_columns('savings_accounts')]
+    if 'image_data' not in sav_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE savings_accounts ADD COLUMN image_data BYTEA;"))
+            conn.commit()
+    if 'image_mime' not in sav_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE savings_accounts ADD COLUMN image_mime VARCHAR(50);"))
             conn.commit()
     # Seed system «Накопления» category
     if not Category.query.filter_by(name='Накопления', user_id=None).first():
