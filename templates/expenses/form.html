@@ -1,0 +1,488 @@
+{% extends 'base.html' %}
+{% block title %}{% if expense %}Редактировать{% else %}Добавить{% endif %} расход{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-body border-0 pt-3 fw-semibold">
+                <i class="bi bi-{% if expense %}pencil{% else %}plus-circle{% endif %}-fill text-primary me-2"></i>
+                {% if expense %}Редактировать расход{% else %}Добавить расход{% endif %}
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="ret_year"  value="{{ ret_year }}">
+                    <input type="hidden" name="ret_month" value="{{ ret_month }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="category_id">Категория <span class="text-danger">*</span></label>
+                        <select name="category_id" id="category_id" class="form-select" required>
+                            <option value="">— выберите —</option>
+                            {% for cat in categories %}
+                                <option value="{{ cat.id }}"
+                                    {% if expense and expense.category_id == cat.id %}selected{% endif %}>
+                                    {{ cat.name }}
+                                </option>
+                            {% endfor %}
+                            <option value="__new__" style="color: var(--bs-primary);">✨ + Создать новую категорию...</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="amount">Сумма, ₽ <span class="text-danger">*</span></label>
+                        <input type="number" name="amount" id="amount" step="0.01" min="0.01" class="form-control"
+                               value="{{ expense.amount|float if expense else '' }}" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="expense_date">Дата <span class="text-danger">*</span></label>
+                        <input type="date" name="expense_date" id="expense_date" class="form-control"
+                               value="{{ expense.expense_date.strftime('%Y-%m-%d') if expense else today.strftime('%Y-%m-%d') }}"
+                               required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="description">Описание</label>
+                        <input type="text" name="description" id="description" class="form-control" maxlength="255"
+                               placeholder="Например: Пятёрочка, проездной..."
+                               value="{{ expense.description or '' if expense else '' }}">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="notes">Заметка</label>
+                        <textarea name="notes" id="notes" class="form-control" rows="2"
+                                  placeholder="Дополнительно...">{{ expense.notes or '' if expense else '' }}</textarea>
+                    </div>
+
+                    <div class="d-flex gap-4 mb-4 flex-wrap">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_planned" id="is_planned"
+                                   {% if not expense or expense.is_planned %}checked{% endif %}>
+                            <label class="form-check-label" for="is_planned">
+                                Запланированный расход
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_spent" id="is_spent"
+                                   {% if not expense or expense.is_spent %}checked{% endif %}>
+                            <label class="form-check-label" for="is_spent">
+                                Деньги уже потрачены
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Вложения -->
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Вложения</label>
+                        <div id="attachmentGrid" class="d-flex flex-wrap gap-2 mb-2">
+                            {% if expense %}
+                            {% for att in expense.attachments %}
+                            <div class="attachment-thumb position-relative" data-att-id="{{ att.id }}">
+                                {% if att.mime_type.startswith('image/') %}
+                                <img src="{{ url_for('attachment_serve', att_id=att.id) }}"
+                                     style="width:60px;height:60px;object-fit:cover;border-radius:6px">
+                                {% else %}
+                                <div class="d-flex align-items-center justify-content-center bg-body-secondary"
+                                     style="width:60px;height:60px;border-radius:6px;font-size:1.8rem">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                </div>
+                                {% endif %}
+                                <button type="button" class="btn btn-danger position-absolute top-0 end-0 rounded-circle p-0"
+                                        style="width:22px;height:22px;min-width:22px;min-height:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box"
+                                        aria-label="Удалить вложение"
+                                        onclick="deleteAttachment({{ att.id }}, this.closest('.attachment-thumb'))">
+                                    <i class="bi bi-x" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            {% endfor %}
+                            {% endif %}
+                        </div>
+                        <label for="attachmentInput"
+                               class="d-inline-flex align-items-center gap-2 text-secondary"
+                               style="cursor:pointer;border:2px dashed currentColor;border-radius:8px;padding:.5rem .75rem">
+                            <i class="bi bi-paperclip"></i>
+                            <span>Прикрепить фото или PDF</span>
+                        </label>
+                        <input type="file" name="attachments" id="attachmentInput" multiple
+                               accept="image/jpeg,image/png,image/webp,application/pdf"
+                               class="d-none"{% if expense %} onchange="uploadFiles(this)"{% endif %}>
+                        <div id="attachmentError" class="text-danger small mt-1 d-none"></div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn grad-primary pulse-btn">
+                            <i class="bi bi-check-lg me-1"></i>
+                            {% if expense %}Сохранить{% else %}Добавить{% endif %}
+                        </button>
+                        <a href="{{ url_for('expenses_list', year=ret_year, month=ret_month) }}" class="btn btn-outline-secondary">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<!-- Модал создания категории -->
+<div class="modal fade" id="newCategoryModal" tabindex="-1" aria-labelledby="newCategoryModalLabel">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h6 class="modal-title fw-semibold" id="newCategoryModalLabel"><i class="bi bi-stars me-1"></i>Новая категория</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="newCatName">Название <span class="text-danger">*</span></label>
+          <input type="text" id="newCatName" class="form-control" maxlength="100" placeholder="напр. Спорт, Хобби...">
+          <div id="newCatError" class="text-danger small mt-1 d-none"></div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Цвет</label>
+          <div class="d-flex gap-2 flex-wrap">
+            {% for color_hex in ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#3498db','#9b59b6','#1abc9c','#95a5a6'] %}
+            <div class="color-swatch" data-color="{{ color_hex }}"
+                 style="width:28px;height:28px;border-radius:50%;background:{{ color_hex }};cursor:pointer;border:3px solid transparent"
+                 onclick="selectColor(this)"></div>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="newCatColor" value="#3498db">
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" id="createCatBtn" class="btn btn-sm grad-primary" onclick="createCategory()">Создать</button>
+      </div>
+      {% set user_cats = categories | selectattr('user_id') | list %}
+      {% if user_cats %}
+      <div class="px-3 pb-3">
+        <hr class="mt-0 mb-2">
+        <div class="fw-semibold small text-muted mb-2">Мои категории</div>
+        <div id="userCatList">
+          {% for cat in user_cats %}
+          <div class="d-flex align-items-center justify-content-between py-1 gap-2" id="cat-row-{{ cat.id }}"
+               data-cat-name="{{ cat.name }}" data-cat-color="{{ cat.color }}">
+            <span class="d-flex align-items-center gap-2 text-truncate">
+              <span class="cat-color-dot" style="width:10px;height:10px;border-radius:50%;background:{{ cat.color }};flex-shrink:0"></span>
+              <span class="small text-truncate cat-name-label">{{ cat.name }}</span>
+            </span>
+            <div class="d-flex gap-1 flex-shrink-0">
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                      style="font-size:.7rem" title="Редактировать"
+                      onclick="openEditCategory({{ cat.id }}, this.closest('[id^=cat-row]'))">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1"
+                      style="font-size:.7rem"
+                      onclick="deleteCategoryRow({{ cat.id }}, this)">✕</button>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Модал редактирования категории -->
+<div class="modal fade" id="editCategoryModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h6 class="modal-title fw-semibold">✏️ Редактировать категорию</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editCatId">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Название <span class="text-danger">*</span></label>
+          <input type="text" id="editCatName" class="form-control" maxlength="100">
+          <div id="editCatError" class="text-danger small mt-1 d-none"></div>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Цвет</label>
+          <div class="d-flex gap-2 flex-wrap">
+            {% for color_hex in ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#3498db','#9b59b6','#1abc9c','#95a5a6'] %}
+            <div class="edit-color-swatch" data-color="{{ color_hex }}"
+                 style="width:28px;height:28px;border-radius:50%;background:{{ color_hex }};cursor:pointer;border:3px solid transparent"
+                 onclick="selectEditColor(this)"></div>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="editCatColor" value="#3498db">
+        </div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" id="saveEditCatBtn" class="btn btn-sm grad-primary" onclick="saveEditCategory()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if expense %}
+// Edit mode: AJAX upload + delete
+async function uploadFiles(input) {
+  const errEl = document.getElementById('attachmentError');
+  errEl.classList.add('d-none');
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  for (const file of Array.from(input.files)) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/expenses/{{ expense.id }}/attachments', {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken},
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Ошибка загрузки';
+        errEl.classList.remove('d-none');
+      } else {
+        appendThumb(data);
+      }
+    } catch(e) {
+      errEl.textContent = 'Ошибка сети';
+      errEl.classList.remove('d-none');
+    }
+  }
+  input.value = '';
+}
+
+function appendThumb(att) {
+  const grid = document.getElementById('attachmentGrid');
+  const thumb = document.createElement('div');
+  thumb.className = 'attachment-thumb position-relative';
+  thumb.dataset.attId = att.id;
+  const inner = att.mime_type.startsWith('image/')
+    ? `<img src="/attachments/${att.id}" style="width:60px;height:60px;object-fit:cover;border-radius:6px">`
+    : `<div class="d-flex align-items-center justify-content-center bg-body-secondary" style="width:60px;height:60px;border-radius:6px;font-size:1.8rem"><i class="bi bi-file-earmark-text"></i></div>`;
+  thumb.innerHTML = inner + `<button type="button" class="btn btn-danger position-absolute top-0 end-0 rounded-circle p-0"
+    style="width:22px;height:22px;min-width:22px;min-height:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box"
+    aria-label="Удалить вложение"
+    onclick="deleteAttachment(${att.id}, this.closest('.attachment-thumb'))"><i class="bi bi-x" aria-hidden="true"></i></button>`;
+  grid.appendChild(thumb);
+}
+
+async function deleteAttachment(attId, thumbEl) {
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  try {
+    const res = await fetch(`/attachments/${attId}`, {
+      method: 'DELETE',
+      headers: {'X-CSRFToken': csrfToken},
+    });
+    if (res.ok) thumbEl.remove();
+  } catch(e) {}
+}
+{% else %}
+// Add mode: show local previews before submit
+document.getElementById('attachmentInput').addEventListener('change', function() {
+  const grid = document.getElementById('attachmentGrid');
+  grid.querySelectorAll('.local-preview').forEach(el => el.remove());
+  Array.from(this.files).forEach(file => {
+    const thumb = document.createElement('div');
+    thumb.className = 'local-preview';
+    thumb.style.cssText = 'width:60px;height:60px;border-radius:6px;overflow:hidden;flex-shrink:0';
+    if (file.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      const reader = new FileReader();
+      reader.onload = e => { img.src = e.target.result; };
+      reader.readAsDataURL(file);
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = '<div class="d-flex align-items-center justify-content-center bg-body-secondary h-100 w-100" style="font-size:1.8rem"><i class="bi bi-file-earmark-text"></i></div>';
+    }
+    grid.appendChild(thumb);
+  });
+});
+{% endif %}
+
+// Loading state при отправке формы
+document.querySelector('form[method="post"]').addEventListener('submit', function() {
+    const btn = this.querySelector('[type="submit"]');
+    if (btn && !btn.disabled) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Сохранение...';
+    }
+});
+
+document.getElementById('category_id').addEventListener('change', function() {
+  if (this.value === '__new__') {
+    this.value = '';
+    new bootstrap.Modal(document.getElementById('newCategoryModal')).show();
+  }
+});
+
+document.getElementById('newCategoryModal').addEventListener('shown.bs.modal', function () {
+  document.getElementById('newCatName').focus();
+});
+
+document.getElementById('newCategoryModal').addEventListener('hidden.bs.modal', function () {
+  document.getElementById('newCatName').value = '';
+  const errEl = document.getElementById('newCatError');
+  errEl.classList.add('d-none');
+  errEl.textContent = '';
+  // Reset color to default
+  document.querySelectorAll('#newCategoryModal .color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  const defaultSwatch = document.querySelector('#newCategoryModal .color-swatch[data-color="#3498db"]');
+  if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
+  document.getElementById('newCatColor').value = '#3498db';
+});
+
+function selectColor(el) {
+  document.querySelectorAll('#newCategoryModal .color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  el.style.border = '3px solid white';
+  document.getElementById('newCatColor').value = el.dataset.color;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  const defaultSwatch = document.querySelector('#newCategoryModal .color-swatch[data-color="#3498db"]');
+  if (defaultSwatch) defaultSwatch.style.border = '3px solid white';
+});
+
+async function deleteCategoryRow(catId, btn) {
+  btn.disabled = true;
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  try {
+    const res = await fetch(`/categories/${catId}`, {
+      method: 'DELETE',
+      headers: {'X-CSRFToken': csrfToken},
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Ошибка удаления');
+      btn.disabled = false;
+      return;
+    }
+    // Убираем строку из списка
+    document.getElementById(`cat-row-${catId}`)?.remove();
+    // Убираем опцию из дропдауна
+    const select = document.getElementById('category_id');
+    select.querySelector(`option[value="${catId}"]`)?.remove();
+  } catch(e) {
+    alert('Ошибка сети');
+    btn.disabled = false;
+  }
+}
+
+async function createCategory() {
+  const btn = document.getElementById('createCatBtn');
+  btn.disabled = true;
+  const name  = document.getElementById('newCatName').value.trim();
+  const color = document.getElementById('newCatColor').value;
+  const errEl = document.getElementById('newCatError');
+  errEl.classList.add('d-none');
+
+  if (!name) {
+    errEl.textContent = 'Введите название';
+    errEl.classList.remove('d-none');
+    btn.disabled = false;
+    return;
+  }
+
+  try {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch('/categories/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+      body: JSON.stringify({name, color})
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Ошибка';
+      errEl.classList.remove('d-none');
+      return;
+    }
+
+    const select = document.getElementById('category_id');
+    const option = new Option(data.name, data.id, true, true);
+    const newOpt = select.querySelector('option[value="__new__"]');
+    select.insertBefore(option, newOpt);
+
+    bootstrap.Modal.getInstance(document.getElementById('newCategoryModal')).hide();
+  } catch (e) {
+    errEl.textContent = 'Ошибка сети';
+    errEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+let _editCatRow = null;
+
+function openEditCategory(catId, rowEl) {
+  _editCatRow = rowEl;
+  document.getElementById('editCatId').value = catId;
+  const name  = rowEl.dataset.catName;
+  const color = rowEl.dataset.catColor;
+  document.getElementById('editCatName').value  = name;
+  document.getElementById('editCatColor').value = color;
+  document.getElementById('editCatError').classList.add('d-none');
+  document.querySelectorAll('.edit-color-swatch').forEach(s => {
+    s.style.border = s.dataset.color === color ? '3px solid white' : '3px solid transparent';
+  });
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editCategoryModal')).show();
+}
+
+function selectEditColor(el) {
+  document.querySelectorAll('.edit-color-swatch').forEach(s => s.style.border = '3px solid transparent');
+  el.style.border = '3px solid white';
+  document.getElementById('editCatColor').value = el.dataset.color;
+}
+
+async function saveEditCategory() {
+  const btn   = document.getElementById('saveEditCatBtn');
+  const catId = document.getElementById('editCatId').value;
+  const name  = document.getElementById('editCatName').value.trim();
+  const color = document.getElementById('editCatColor').value;
+  const errEl = document.getElementById('editCatError');
+  errEl.classList.add('d-none');
+
+  if (!name) {
+    errEl.textContent = 'Введите название';
+    errEl.classList.remove('d-none');
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    const res  = await fetch(`/categories/${catId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content},
+      body: JSON.stringify({name, color}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Ошибка';
+      errEl.classList.remove('d-none');
+      return;
+    }
+
+    if (_editCatRow) {
+      _editCatRow.dataset.catName  = data.name;
+      _editCatRow.dataset.catColor = data.color;
+      _editCatRow.querySelector('.cat-color-dot').style.background = data.color;
+      _editCatRow.querySelector('.cat-name-label').textContent     = data.name;
+    }
+
+    const opt = document.querySelector(`#category_id option[value="${catId}"]`);
+    if (opt) opt.textContent = data.name;
+
+    bootstrap.Modal.getInstance(document.getElementById('editCategoryModal')).hide();
+  } catch(e) {
+    errEl.textContent = 'Ошибка сети';
+    errEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

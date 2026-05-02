@@ -1,0 +1,842 @@
+{% extends 'base.html' %}
+{% block title %}Трекер расходов{% endblock %}
+
+{% block content %}
+<!-- Фильтр месяца -->
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-bar-chart-line-fill text-primary me-2"></i>
+        Обзор расходов
+    </h4>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <form class="d-flex gap-2 align-items-center" method="get">
+            <select name="month" class="form-select form-select-sm" style="width:140px"
+                    onchange="this.form.submit()">
+                {% for m_num, m_name in months %}
+                    <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+                {% endfor %}
+            </select>
+            <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+                   onchange="this.form.submit()">
+            <button class="btn grad-primary btn-sm" type="submit" title="Применить фильтр"><i class="bi bi-funnel"></i></button>
+        </form>
+        {% if can_copy %}
+        <form method="post" action="{{ url_for('copy_from_previous') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="year"  value="{{ year }}">
+            <input type="hidden" name="month" value="{{ month }}">
+            <button type="submit" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-copy me-1"></i>Скопировать данные с прошлого месяца
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Итоговые карточки -->
+<div class="row g-3 mb-4 summary-cards">
+    <div class="col-md-3">
+        <div class="card summary-card grad-income h-100 float-card"
+             data-href="{{ url_for('income_list', year=year, month=month) }}"
+             role="link" tabindex="0" aria-label="Перейти к доходам">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Доходы</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ total_income }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(total_income) }} ₽</div>
+                </div>
+                <i class="bi bi-arrow-down-circle" style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <a href="{{ url_for('income_list', year=year, month=month) }}"
+                   class="small text-white-50">все доходы →</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card grad-primary h-100 float-card"
+             data-href="{{ url_for('expenses_list', year=year, month=month) }}"
+             role="link" tabindex="0" aria-label="Перейти к расходам">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Расходы</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ total_spent }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(total_spent) }} ₽</div>
+                </div>
+                <i class="bi bi-arrow-up-circle" style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <a href="{{ url_for('expenses_list', year=year, month=month) }}"
+                   class="small text-white-50">все расходы →</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card h-100 float-card
+            {% if balance >= 0 %}grad-balance{% else %}grad-danger{% endif %}">
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Баланс</div>
+                    <div class="fs-3 fw-bold count-up"
+                         data-value="{{ balance }}"
+                         data-decimals="2"
+                         data-suffix=" ₽">{{ "%.2f"|format(balance) }} ₽</div>
+                </div>
+                <i class="bi {% if balance >= 0 %}bi-piggy-bank{% else %}bi-exclamation-triangle{% endif %}"
+                   style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <span class="small text-white-50">
+                    {% if balance >= 0 %}В запасе{% else %}Перерасход{% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card summary-card grad-daily h-100 float-card"
+             id="dailyBudgetCard"
+             role="button" tabindex="0"
+             aria-label="Настроить даты выплат"
+             style="cursor:pointer"
+             {% if daily_info %}
+             data-nearest-date="{{ daily_info.nearest_date.isoformat() }}"
+             data-balance="{{ balance }}"
+             data-payment-type="{{ daily_info.payment_type }}"
+             {% endif %}>
+            <div class="card-body d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="small opacity-75">Можно тратить в день</div>
+                    {% if daily_info %}
+                        <div class="fs-3 fw-bold count-up"
+                             id="dailyAmount"
+                             data-value="{{ daily_info.daily }}"
+                             data-decimals="2"
+                             data-suffix=" ₽"
+                             {% if daily_info.daily < 0 %}style="color:#ff6b6b!important;text-shadow:0 0 12px rgba(255,80,80,.5)"{% endif %}>
+                            {{ "%.2f"|format(daily_info.daily) }} ₽
+                        </div>
+                    {% else %}
+                        <div class="fs-5 fw-bold text-white">Укажите даты</div>
+                    {% endif %}
+                </div>
+                <i class="bi bi-calendar-check" style="font-size:2.5rem;opacity:.35"></i>
+            </div>
+            <div class="card-footer pb-2">
+                <span class="small text-white-50" id="dailyFooter">
+                    {% if daily_info %}
+                        до {{ daily_info.payment_type }} {{ daily_info.days_left }} дн.
+                    {% else %}
+                        нажмите, чтобы настроить
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if savings_data %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-piggy-bank-fill text-primary me-2"></i>Накопления</span>
+        <a href="{{ url_for('savings_list') }}" class="small">все счета →</a>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            {% for item in savings_data %}
+            <div class="col-sm-6 col-lg-4">
+                <div class="border rounded-3 p-3 h-100 savings-dash-card"
+                     role="button" tabindex="0"
+                     onclick="savingsDashCardClick(event, {{ item.acc.id }})"
+                     onkeydown="if(event.key==='Enter'){savingsDashCardClick(event,{{ item.acc.id }})}">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        {% if item.acc.image_data %}
+                        <img src="{{ url_for('savings_image', acc_id=item.acc.id) }}"
+                             class="rounded-2 flex-shrink-0"
+                             style="width:32px;height:32px;object-fit:cover">
+                        {% else %}
+                        <div class="rounded-2 d-flex align-items-center justify-content-center flex-shrink-0"
+                             style="width:32px;height:32px;background:{{ item.acc.color }}22">
+                            <i class="bi {{ item.acc.icon }}" style="color:{{ item.acc.color }}"></i>
+                        </div>
+                        {% endif %}
+                        <span class="fw-semibold text-truncate">{{ item.acc.name }}</span>
+                    </div>
+                    <div class="fw-bold fs-5 text-success mb-1">{{ "%.2f"|format(item.balance) }} ₽</div>
+                    {% if item.acc.target_amount and item.pct is not none %}
+                    <div class="text-muted small mb-1">
+                        из {{ "%.0f"|format(item.acc.target_amount|float) }} ₽ — {{ item.pct }}%
+                    </div>
+                    <div class="progress mb-2" style="height:5px;border-radius:4px">
+                        <div class="progress-bar"
+                             style="width:{{ item.pct }}%;background:{{ item.acc.color }}"></div>
+                    </div>
+                    {% endif %}
+                    <div class="d-flex gap-1 mt-2" onclick="event.stopPropagation()">
+                        <button type="button" class="btn btn-outline-success btn-sm flex-fill"
+                                style="font-size:.75rem"
+                                onclick="openSavingsDepositModal({{ item.acc.id }}, '{{ item.acc.name | e }}')">
+                            <i class="bi bi-plus"></i> Пополнить
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm flex-fill"
+                                style="font-size:.75rem"
+                                onclick="openSavingsWithdrawModal({{ item.acc.id }}, '{{ item.acc.name | e }}', {{ item.balance }})">
+                            <i class="bi bi-dash"></i> Снять
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- Категории -->
+    <div class="col-lg-7">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-grid-fill text-primary me-2"></i>По категориям
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for row in summary %}
+                    {% set spent = row.total|float %}
+                    {% set budget = budget_map.get(row.id, 0) %}
+                    {% if spent > 0 or budget > 0 %}
+                    <li class="list-group-item px-3 py-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span>
+                                <i class="bi {{ row.icon }} me-2" style="color:{{ row.color }}"></i>
+                                <strong>{{ row.name }}</strong>
+                            </span>
+                            <span class="fw-semibold">
+                                {{ "%.2f"|format(spent) }} ₽
+                                {% if budget > 0 %}
+                                    <span class="text-muted small">/ {{ "%.0f"|format(budget) }}</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% if budget > 0 %}
+                        {% set pct = [spent / budget * 100, 100]|min %}
+                        <div class="progress" style="height:7px;border-radius:6px">
+                            <div class="prog-bar-animated"
+                                 data-value="{{ pct|round|int }}"></div>
+                        </div>
+                        {% endif %}
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- График + последние -->
+    <div class="col-lg-5">
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-header bg-body fw-semibold border-0 pt-3">
+                <i class="bi bi-pie-chart-fill text-primary me-2"></i>Диаграмма
+            </div>
+            <div class="card-body position-relative">
+                <div id="chartSkeleton" class="skeleton" style="height:230px;border-radius:50%;width:230px;margin:0 auto"></div>
+                <canvas id="pieChart" height="230" style="display:none"></canvas>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex justify-content-between">
+                <span><i class="bi bi-clock-history text-primary me-2"></i>Последние расходы</span>
+                <a href="{{ url_for('expenses_list', year=year, month=month) }}" class="small">все →</a>
+            </div>
+            <ul class="list-group list-group-flush">
+                {% for exp in recent %}
+                <li class="list-group-item px-3 py-2 stagger-item">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
+                                {{ exp.category.name }}
+                            </span>
+                            {% if not exp.is_planned and not exp.savings_account %}
+                                <span class="badge bg-warning text-dark ms-1">незаплан.</span>
+                            {% endif %}
+                            <div class="small text-muted mt-1">{{ exp.description or '—' }}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="fw-semibold">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
+                            <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m') }}</div>
+                        </div>
+                    </div>
+                </li>
+                {% else %}
+                <li class="list-group-item text-muted text-center py-3">Расходов пока нет</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════════════
+     СТАТИСТИКА — минималистичная карточка
+════════════════════════════════════════════════════════════════════ -->
+<div class="card shadow-sm border-0 mt-4">
+    <!-- Шапка карточки — те же классы что у «Диаграммы» и «По категориям» -->
+    <div class="card-header bg-body fw-semibold border-0 pt-3 d-flex align-items-center justify-content-between"
+         id="statToggle" role="button" style="cursor:pointer;user-select:none"
+         aria-expanded="true" aria-controls="statCollapsible">
+        <span>
+            <i class="bi bi-bar-chart-steps text-primary me-2"></i>Статистика
+        </span>
+        <i class="bi bi-chevron-down stat-chevron" id="statChevron"></i>
+    </div>
+
+    <div class="card-body">
+        <!-- Переключатель режима -->
+        <div class="d-flex align-items-center justify-content-between mb-1 flex-wrap gap-2">
+            <div class="stat-sec-title mb-0">Сравнение расходов</div>
+            <div class="stat-mode-switch" id="statModeSwitch">
+                <div class="switch-pill" id="switchPill"></div>
+                <button class="on" id="btnPrevMonth" type="button">прошлый месяц</button>
+                <button id="btnPrevYear" type="button">прошлый год</button>
+            </div>
+        </div>
+
+        <!-- Коллапс-обёртка -->
+        <div class="stat-collapsible" id="statCollapsible">
+            <div class="stat-collapsible-inner">
+
+                <div style="font-size:.75rem;margin-bottom:14px;margin-top:10px;color:var(--bs-secondary-color)" id="statPeriodLabel"></div>
+
+                <div id="catCompareList">
+                    <div class="skeleton mb-2" style="height:36px;border-radius:8px"></div>
+                    <div class="skeleton mb-2" style="height:36px;border-radius:8px"></div>
+                    <div class="skeleton"      style="height:36px;border-radius:8px"></div>
+                </div>
+
+                <div class="stat-total-row" id="statTotalRow" style="display:none">
+                    <span class="stat-total-label">Итого за месяц</span>
+                    <span class="stat-total-amt" id="statTotalAmt"></span>
+                    <span id="statTotalDelta"></span>
+                </div>
+
+                <hr style="border-color:var(--bs-border-color);margin:18px 0 16px">
+
+                <div class="stat-sec-title" style="margin-bottom:12px">
+                    <span>Динамика за 3 месяца</span>
+                    {% if year != today.year or month != today.month %}
+                    <a href="{{ url_for('index') }}"
+                       class="btn btn-sm btn-outline-secondary"
+                       style="font-size:0.7rem;padding:2px 10px;border-radius:20px;font-weight:600">
+                        ← сегодня
+                    </a>
+                    {% endif %}
+                </div>
+
+                <div class="month-pills-row" id="monthPillsRow">
+                    <div class="skeleton" style="flex:1;height:90px;border-radius:10px"></div>
+                    <div class="skeleton" style="flex:1;height:90px;border-radius:10px"></div>
+                    <div class="skeleton" style="flex:1;height:90px;border-radius:10px"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal fade" id="paymentDaysModal" tabindex="-1" aria-labelledby="paymentDaysModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="paymentDaysModalLabel">
+                    <i class="bi bi-calendar-check text-primary me-2"></i>Даты выплат
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">День аванса (1–31)</label>
+                    <input type="number" id="advanceDayInput" class="form-control"
+                           min="1" max="31" placeholder="не задан"
+                           value="{{ advance_day or '' }}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">День зарплаты (1–31)</label>
+                    <input type="number" id="salaryDayInput" class="form-control"
+                           min="1" max="31" placeholder="не задан"
+                           value="{{ salary_day or '' }}">
+                </div>
+                <div id="paymentDaysError" class="text-danger small d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn grad-primary btn-sm" id="savePaymentDays">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Savings deposit modal (dashboard) -->
+<div class="modal fade" id="dashDepositModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-plus-circle text-success me-1"></i>Пополнить:
+                    <span id="dashDepName"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-0">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Сумма *</label>
+                    <input type="number" id="dashDepAmount" class="form-control"
+                           min="0.01" step="0.01">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Дата *</label>
+                    <input type="date" id="dashDepDate" class="form-control">
+                </div>
+                <div id="dashDepError" class="text-danger small d-none"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button class="btn btn-success btn-sm" onclick="submitDashDeposit()">Пополнить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Savings withdraw modal (dashboard) -->
+<div class="modal fade" id="dashWithdrawModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-dash-circle text-danger me-1"></i>Снять:
+                    <span id="dashWitName"></span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-0">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Сумма *</label>
+                    <input type="number" id="dashWitAmount" class="form-control"
+                           min="0.01" step="0.01">
+                    <div class="text-muted small mt-1">Доступно:
+                        <span id="dashWitBalance"></span> ₽</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-semibold">Дата *</label>
+                    <input type="date" id="dashWitDate" class="form-control">
+                </div>
+                <div id="dashWitError" class="text-danger small d-none"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button class="btn btn-danger btn-sm" onclick="submitDashWithdraw()">Снять</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Пересчёт "можно тратить в день" по клиентской дате/таймзоне
+(function() {
+    const card = document.getElementById('dailyBudgetCard');
+    if (!card || !card.dataset.nearestDate) return;
+
+    const [y, m, d] = card.dataset.nearestDate.split('-').map(Number);
+    const nearest = new Date(y, m - 1, d); // локальная полночь
+    const today   = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const daysLeft  = Math.max(Math.ceil((nearest - today) / 86400000), 1);
+    const balance   = parseFloat(card.dataset.balance);
+    const daily     = balance / daysLeft;
+    const payType   = card.dataset.paymentType;
+
+    const amountEl = document.getElementById('dailyAmount');
+    const footerEl = document.getElementById('dailyFooter');
+
+    if (amountEl) {
+        amountEl.dataset.value = daily.toFixed(2);
+        amountEl.textContent   = daily.toFixed(2) + ' ₽';
+        if (daily < 0) {
+            amountEl.style.color      = '#ff6b6b';
+            amountEl.style.textShadow = '0 0 12px rgba(255,80,80,.5)';
+        } else {
+            amountEl.style.color      = '';
+            amountEl.style.textShadow = '';
+        }
+    }
+    if (footerEl) {
+        footerEl.textContent = `до ${payType} ${daysLeft} дн.`;
+    }
+})();
+
+const NEON_COLORS = [
+    '#4361ee', '#00b4d8', '#7209b7', '#00ffb8',
+    '#ee66ff', '#4cc9f0', '#f72585', '#4895ef',
+    '#00e5ff', '#b5179e', '#3a86ff', '#06d6a0',
+];
+
+let _chartInstance = null;
+let _chartData     = null;
+
+function isDark() {
+    return document.documentElement.getAttribute('data-bs-theme') === 'dark';
+}
+
+function renderChart(d) {
+    const canvas = document.getElementById('pieChart');
+    if (!canvas || !d || !d.data.length) return;
+
+    if (_chartInstance) { _chartInstance.destroy(); _chartInstance = null; }
+
+    const dark   = isDark();
+    const colors = dark
+        ? d.colors.map((_, i) => NEON_COLORS[i % NEON_COLORS.length])
+        : d.colors;
+    const cardBg = dark ? '#0c0c22' : '#ffffff';
+
+    _chartInstance = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels: d.labels,
+            datasets: [{
+                data: d.data,
+                backgroundColor: colors,
+                borderWidth: 3,
+                borderColor: cardBg,
+                hoverOffset: 8,
+            }]
+        },
+        options: {
+            animation: { animateRotate: true, duration: 600 },
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 12 },
+                        padding: 16,
+                        color: dark ? '#a0b4ff' : '#666',
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.label}: ${ctx.parsed.toLocaleString('ru-RU')} ₽`
+                    }
+                }
+            }
+        }
+    });
+}
+
+fetch(`/api/chart-data?year={{ year }}&month={{ month }}`)
+    .then(r => r.json())
+    .then(d => {
+        _chartData = d;
+        const skeleton = document.getElementById('chartSkeleton');
+        const canvas   = document.getElementById('pieChart');
+        if (skeleton) skeleton.style.display = 'none';
+        if (canvas)   canvas.style.display   = '';
+        renderChart(d);
+    });
+
+// Перерисовываем чарт при смене темы
+const _themeObserver = new MutationObserver(() => {
+    if (_chartData) renderChart(_chartData);
+});
+_themeObserver.observe(document.documentElement, {
+    attributes: true, attributeFilter: ['data-bs-theme']
+});
+
+// ── Статистика ────────────────────────────────────────────────────
+function fmtRub(val) {
+    return val.toLocaleString('ru-RU', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' ₽';
+}
+
+function deltaBadge(delta) {
+    if (delta === null || delta === undefined)
+        return '<span class="delta-badge delta-new">новая</span>';
+    if (delta === 0)
+        return '<span class="delta-badge delta-zero">0%</span>';
+    const sign = delta > 0 ? '+' : '';
+    const cls  = delta > 0 ? 'delta-up' : 'delta-down';
+    return `<span class="delta-badge ${cls}">${sign}${delta}%</span>`;
+}
+
+function renderStats(data) {
+    const cmp = data.comparison;
+    const mon = data.monthly;
+
+    // Подпись периода
+    document.getElementById('statPeriodLabel').textContent =
+        `${cmp.current_label} vs ${cmp.compare_label}`;
+
+    // Список категорий
+    const listEl = document.getElementById('catCompareList');
+    if (!cmp.categories.length) {
+        listEl.innerHTML = '<p class="text-muted text-center py-3">Нет данных для сравнения</p>';
+    } else {
+        listEl.innerHTML = cmp.categories.map(c => `
+            <div class="cat-stat-row">
+                <span class="cat-stat-dot" style="background:${c.color}"></span>
+                <span class="cat-stat-name">${c.name}</span>
+                <span class="cat-stat-amount">${fmtRub(c.current)}</span>
+                ${deltaBadge(c.delta_pct)}
+            </div>`).join('');
+    }
+
+    // Итого
+    const totalRow = document.getElementById('statTotalRow');
+    totalRow.style.display = '';
+    document.getElementById('statTotalAmt').textContent   = fmtRub(cmp.total_current);
+    document.getElementById('statTotalDelta').innerHTML   = deltaBadge(cmp.total_delta);
+
+    // Карточки месяцев
+    const pillsRow = document.getElementById('monthPillsRow');
+    pillsRow.innerHTML = mon.months.map(m => {
+        const delta = m.expense_delta !== undefined && m.expense_delta !== null
+            ? `<div class="mp-delta">расходы ${m.expense_delta >= 0 ? '+' : ''}${m.expense_delta}%</div>` : '';
+        const clickable = !m.is_current ? `data-year="${m.year}" data-month="${m.month}" style="cursor:pointer"` : '';
+        return `
+            <div class="month-pill${m.is_current ? ' is-current' : ''}" ${clickable}>
+                <div class="mp-name">${m.label}${m.is_current ? ' ●' : ''}</div>
+                <div class="mp-inc">↓ ${fmtRub(m.income)}</div>
+                <div class="mp-exp">↑ ${fmtRub(m.expenses)}</div>
+                ${delta}
+            </div>`;
+    }).join('');
+
+    // Клик по карточке месяца → переход на тот месяц
+    pillsRow.querySelectorAll('.month-pill[data-year]').forEach(pill => {
+        pill.addEventListener('click', () => {
+            window.location.href = `/?year=${pill.dataset.year}&month=${pill.dataset.month}`;
+        });
+    });
+
+    // Анимация появления карточек
+    pillsRow.querySelectorAll('.month-pill').forEach(pill => {
+        pill.classList.add('animating');
+        pill.addEventListener('animationend', () => {
+            pill.classList.remove('animating');
+            pill.style.opacity = '1';
+            pill.classList.add('ready');
+        }, { once: true });
+    });
+}
+
+// ── Liquid pill ──────────────────────────────────────────────────────
+function movePill(btn, instant) {
+    const pill      = document.getElementById('switchPill');
+    const container = document.getElementById('statModeSwitch');
+    const cRect     = container.getBoundingClientRect();
+    const bRect     = btn.getBoundingClientRect();
+    if (instant) pill.style.transition = 'none';
+    pill.style.left  = (bRect.left - cRect.left - 2) + 'px';
+    pill.style.width = bRect.width + 'px';
+    if (instant) requestAnimationFrame(() => { pill.style.transition = ''; });
+}
+
+function loadStats(mode) {
+    const btnMonth = document.getElementById('btnPrevMonth');
+    const btnYear  = document.getElementById('btnPrevYear');
+    btnMonth.classList.toggle('on', mode === 'prev_month');
+    btnYear.classList.toggle('on',  mode === 'prev_year');
+    movePill(mode === 'prev_month' ? btnMonth : btnYear, false);
+    fetch(`/api/stats-data?year={{ year }}&month={{ month }}&mode=${mode}`)
+        .then(r => r.json())
+        .then(renderStats);
+}
+
+document.getElementById('btnPrevMonth').addEventListener('click', () => loadStats('prev_month'));
+document.getElementById('btnPrevYear').addEventListener('click',  () => loadStats('prev_year'));
+
+// Init pill without transition, then let CSS take over
+movePill(document.getElementById('btnPrevMonth'), true);
+loadStats('prev_month');
+
+// ── Коллапс статистики ────────────────────────────────────────────
+(function () {
+    const toggle      = document.getElementById('statToggle');
+    const collapsible = document.getElementById('statCollapsible');
+    const chevron     = document.getElementById('statChevron');
+    let collapsed     = localStorage.getItem('statCollapsed') === '1';
+
+    function apply(animate) {
+        if (!animate) {
+            collapsible.style.transition = 'none';
+            chevron.style.transition = 'none';
+            requestAnimationFrame(() => {
+                collapsible.style.transition = '';
+                chevron.style.transition = '';
+            });
+        }
+        collapsible.classList.toggle('is-collapsed', collapsed);
+        chevron.classList.toggle('is-collapsed', collapsed);
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+    }
+
+    apply(false); // без анимации при загрузке
+
+    toggle.addEventListener('click', () => {
+        collapsed = !collapsed;
+        localStorage.setItem('statCollapsed', collapsed ? '1' : '0');
+        apply(true);
+    });
+})();
+
+// ── Кликабельные карточки (data-href) ────────────────────────────
+document.querySelectorAll('[data-href]').forEach(card => {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', e => {
+        // Не перехватываем клик по вложенным ссылкам
+        if (e.target.closest('a')) return;
+        window.location.href = card.dataset.href;
+    });
+    // Поддержка Enter/Space для доступности
+    card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            window.location.href = card.dataset.href;
+        }
+    });
+});
+
+// ── Savings card hover style ─────────────────────────────────────
+(function () {
+    const style = document.createElement('style');
+    style.textContent = `
+        .savings-dash-card {
+            transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+            cursor: pointer;
+        }
+        .savings-dash-card:hover {
+            transform: translateY(-3px) scale(1.015);
+            box-shadow: 0 6px 20px rgba(0,0,0,.13);
+            border-color: #0d6efd55 !important;
+        }
+        [data-bs-theme="dark"] .savings-dash-card:hover {
+            box-shadow: 0 6px 20px rgba(0,0,0,.4);
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+function savingsDashCardClick(event, accId) {
+    if (event.target.closest('button')) return;
+    window.location.href = `/savings?acc=${accId}`;
+}
+
+// ── Savings modals on dashboard ───────────────────────────────────
+let _dashDepAccId = null, _dashWitAccId = null;
+
+(function () {
+    const viewYear  = {{ year }};
+    const viewMonth = {{ month }};
+    const now       = new Date();
+    const isCurrentMonth = (now.getFullYear() === viewYear && now.getMonth() + 1 === viewMonth);
+    window._dashDefaultDate = isCurrentMonth
+        ? now.toISOString().slice(0, 10)
+        : `${viewYear}-${String(viewMonth).padStart(2, '0')}-01`;
+})();
+
+function openSavingsDepositModal(accId, name) {
+    _dashDepAccId = accId;
+    document.getElementById('dashDepName').textContent   = name;
+    document.getElementById('dashDepAmount').value       = '';
+    document.getElementById('dashDepDate').value         = _dashDefaultDate;
+    document.getElementById('dashDepError').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dashDepositModal')).show();
+}
+
+async function submitDashDeposit() {
+    const amount = document.getElementById('dashDepAmount').value;
+    const date   = document.getElementById('dashDepDate').value;
+    const errEl  = document.getElementById('dashDepError');
+    errEl.classList.add('d-none');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/savings/${_dashDepAccId}/deposit`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({amount: parseFloat(amount), date}),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    location.reload();
+}
+
+function openSavingsWithdrawModal(accId, name, balance) {
+    _dashWitAccId = accId;
+    document.getElementById('dashWitName').textContent    = name;
+    document.getElementById('dashWitBalance').textContent = balance.toFixed(2);
+    document.getElementById('dashWitAmount').value        = '';
+    document.getElementById('dashWitDate').value          = _dashDefaultDate;
+    document.getElementById('dashWitError').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('dashWithdrawModal')).show();
+}
+
+async function submitDashWithdraw() {
+    const amount = document.getElementById('dashWitAmount').value;
+    const date   = document.getElementById('dashWitDate').value;
+    const errEl  = document.getElementById('dashWitError');
+    errEl.classList.add('d-none');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/savings/${_dashWitAccId}/withdraw`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({amount: parseFloat(amount), date}),
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    location.reload();
+}
+
+// ── Карточка «Можно тратить в день» ──────────────────────────────
+(function () {
+    const card  = document.getElementById('dailyBudgetCard');
+    const modal = new bootstrap.Modal(document.getElementById('paymentDaysModal'));
+
+    card.addEventListener('click', () => modal.show());
+    card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); modal.show(); }
+    });
+
+    document.getElementById('savePaymentDays').addEventListener('click', () => {
+        const salaryDay  = document.getElementById('salaryDayInput').value.trim();
+        const advanceDay = document.getElementById('advanceDayInput').value.trim();
+        const errEl      = document.getElementById('paymentDaysError');
+        errEl.classList.add('d-none');
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const body = new FormData();
+        body.append('csrf_token', csrfToken);
+        if (salaryDay)  body.append('salary_day',  salaryDay);
+        if (advanceDay) body.append('advance_day', advanceDay);
+
+        fetch('/api/payment-days', { method: 'POST', body })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    window.location.reload();
+                } else {
+                    errEl.textContent = data.error || 'Ошибка сохранения';
+                    errEl.classList.remove('d-none');
+                }
+            })
+            .catch(() => {
+                errEl.textContent = 'Ошибка сети';
+                errEl.classList.remove('d-none');
+            });
+    });
+})();
+</script>
+{% endblock %}

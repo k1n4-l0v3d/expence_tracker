@@ -1,0 +1,686 @@
+{% extends 'base.html' %}
+{% block title %}Расходы — {{ month }}/{{ year }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-list-ul text-primary me-2"></i>Расходы</h4>
+    <a href="{{ url_for('expense_add', ret_year=year, ret_month=month) }}" class="btn grad-primary btn-sm d-none d-lg-inline-flex pulse-btn">
+        <i class="bi bi-plus-lg me-1"></i>Добавить
+    </a>
+</div>
+
+<!-- Фильтры -->
+<form class="filter-form d-flex gap-2 flex-wrap mb-4" method="get">
+    <select name="month" class="form-select form-select-sm" style="width:140px"
+            onchange="this.form.submit()">
+        {% for m_num, m_name in months %}
+            <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+        {% endfor %}
+    </select>
+    <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+           onchange="this.form.submit()">
+    <select name="category_id" class="form-select form-select-sm" style="width:180px"
+            onchange="this.form.submit()">
+        <option value="">Все категории</option>
+        {% for cat in categories %}
+            <option value="{{ cat.id }}" {% if cat.id == selected_cat %}selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+    </select>
+    <select name="spent" class="form-select form-select-sm" style="width:160px"
+            onchange="this.form.submit()">
+        <option value="all"    {% if spent_filter == 'all'    %}selected{% endif %}>Все расходы</option>
+        <option value="spent"  {% if spent_filter == 'spent'  %}selected{% endif %}>✅ Потраченные</option>
+        <option value="unspent"{% if spent_filter == 'unspent'%}selected{% endif %}>⏳ Не потраченные</option>
+    </select>
+    <input type="hidden" name="sort" id="sortInput" value="{{ sort }}">
+    <div class="dropdown">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+            <i class="bi bi-arrow-down-up me-1"></i>
+            {% if sort == 'date_desc' %}По дате ↓
+            {% elif sort == 'date_asc' %}По дате ↑
+            {% elif sort == 'amount_desc' %}По сумме ↓
+            {% elif sort == 'amount_asc' %}По сумме ↑
+            {% elif sort == 'category_asc' %}По категории
+            {% endif %}
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item {% if sort == 'date_desc' %}active{% endif %}" href="#" onclick="setSort('date_desc')">↓ По дате (новые)</a></li>
+            <li><a class="dropdown-item {% if sort == 'date_asc' %}active{% endif %}"  href="#" onclick="setSort('date_asc')">↑ По дате (старые)</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if sort == 'amount_desc' %}active{% endif %}" href="#" onclick="setSort('amount_desc')">↓ По сумме (больше)</a></li>
+            <li><a class="dropdown-item {% if sort == 'amount_asc' %}active{% endif %}"  href="#" onclick="setSort('amount_asc')">↑ По сумме (меньше)</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if sort == 'category_asc' %}active{% endif %}" href="#" onclick="setSort('category_asc')">А→Я По категории</a></li>
+        </ul>
+    </div>
+</form>
+{% block scripts %}
+<style>
+.record-card.not-spent {
+    background: #fffbf0;
+    border: 1.5px dashed #f0c040;
+}
+[data-bs-theme="dark"] .record-card.not-spent {
+    background: rgba(240,192,64,.07);
+    border: 1.5px dashed rgba(240,192,64,.45);
+}
+</style>
+<script>
+let _detailModalEl = null;
+
+function openExpenseDetail(el) {
+    const exp = JSON.parse(el.dataset.exp);
+
+    if (!_detailModalEl) _detailModalEl = document.getElementById('expenseDetailModal');
+
+    _detailModalEl.querySelector('#edCategoryBadge').textContent = exp.category;
+    _detailModalEl.querySelector('#edCategoryBadge').style.background = exp.color;
+    _detailModalEl.querySelector('#edDescription').textContent = exp.description || '—';
+
+    const notesEl = _detailModalEl.querySelector('#edNotes');
+    notesEl.textContent = exp.notes || '';
+    notesEl.style.display = exp.notes ? '' : 'none';
+
+    _detailModalEl.querySelector('#edAmount').textContent = exp.amount + ' ₽';
+    _detailModalEl.querySelector('#edDate').textContent = exp.date;
+
+    const badgesEl = _detailModalEl.querySelector('#edBadges');
+    badgesEl.innerHTML = '';
+    if (!exp.is_planned && !exp.is_savings) {
+        badgesEl.innerHTML += '<span class="badge bg-warning-subtle text-warning border border-warning">незапланированный</span>';
+    }
+    if (!exp.is_spent) {
+        badgesEl.innerHTML += '<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Не потрачено</span>';
+    } else {
+        badgesEl.innerHTML += '<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-lg me-1"></i>Потрачено</span>';
+    }
+
+    const copyBtn = _detailModalEl.querySelector('#copyFromDetailBtn');
+    if (copyBtn) {
+        const expId = el.dataset.expId;
+        const expMonth = new Date(exp.date.split('.').reverse().join('-')).getMonth() + 1;
+        copyBtn.onclick = () => {
+            const inst = bootstrap.Modal.getInstance(_detailModalEl);
+            if (inst) {
+                _detailModalEl.addEventListener('hidden.bs.modal', () => {
+                    openCopyModal(expId, expMonth, exp.description || exp.category, exp.amount);
+                }, {once: true});
+                inst.hide();
+            } else {
+                openCopyModal(expId, expMonth, exp.description || exp.category, exp.amount);
+            }
+        };
+    }
+
+    if (_detailModalEl.parentElement !== document.body) {
+        document.body.appendChild(_detailModalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(_detailModalEl).show();
+}
+
+// Подтверждение удаления через модал
+let _pendingDeleteForm = null;
+let _confirmDeleteModalEl = null;
+document.addEventListener('DOMContentLoaded', function() {
+    // Захватываем ссылку до любых переносов в body (избегаем поиск дубликата)
+    _confirmDeleteModalEl = document.getElementById('confirmDeleteModal');
+
+    document.querySelectorAll('.expense-delete-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            _pendingDeleteForm = this;
+            if (_confirmDeleteModalEl.parentElement !== document.body) {
+                document.body.appendChild(_confirmDeleteModalEl);
+            }
+            bootstrap.Modal.getOrCreateInstance(_confirmDeleteModalEl).show();
+        });
+    });
+    _confirmDeleteModalEl.querySelector('#confirmDeleteBtn').addEventListener('click', function() {
+        if (_pendingDeleteForm) {
+            const inst = bootstrap.Modal.getInstance(_confirmDeleteModalEl);
+            if (inst) inst.hide();
+            _pendingDeleteForm.submit();
+        }
+    });
+});
+
+function setSort(value) {
+    document.getElementById('sortInput').value = value;
+    document.querySelector('.filter-form').submit();
+}
+
+async function toggleSpent(expId, btn) {
+    btn.disabled = true;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    try {
+        const res = await fetch(`/expenses/${expId}/toggle-spent`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken},
+        });
+        if (!res.ok) { btn.disabled = false; return; }
+        location.reload();
+    } catch(e) {
+        btn.disabled = false;
+    }
+}
+
+function previewImage(src) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;transition:opacity 250ms ease-out';
+    ov.style.opacity = reduced ? '1' : '0';
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;transition:transform 250ms ease-out,opacity 250ms ease-out';
+    if (!reduced) {
+        img.style.opacity = '0';
+        img.style.transform = 'scale(0.82)';
+    }
+    ov.appendChild(img);
+
+    function closePreview() {
+        if (reduced) { ov.remove(); return; }
+        ov.style.transition = 'opacity 150ms ease-in';
+        img.style.transition = 'transform 150ms ease-in,opacity 150ms ease-in';
+        ov.style.opacity = '0';
+        img.style.opacity = '0';
+        img.style.transform = 'scale(0.9)';
+        setTimeout(() => ov.remove(), 160);
+    }
+
+    ov.onclick = closePreview;
+    document.addEventListener('keydown', function onKey(e) {
+        if (e.key === 'Escape') { closePreview(); document.removeEventListener('keydown', onKey); }
+    });
+
+    document.body.appendChild(ov);
+    if (!reduced) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            ov.style.opacity = '1';
+            img.style.opacity = '1';
+            img.style.transform = 'scale(1)';
+        }));
+    }
+}
+
+let _attachmentsModalInstance = null;
+let _attachmentsSourceBtn = null;
+let _attachmentsExpId = null;
+let _attachmentsGrid = null;
+
+function updateAttachmentsTitle(count) {
+    const word = count === 1 ? 'файл' : count < 5 ? 'файла' : 'файлов';
+    document.getElementById('attachmentsModalTitle').textContent =
+        `Прикреплённые файлы · ${count} ${word}`;
+}
+
+async function deleteAttachmentFromModal(attId, itemEl) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const res = await fetch(`/attachments/${attId}`, {
+        method: 'DELETE',
+        headers: {'X-CSRFToken': csrfToken},
+    });
+    if (!res.ok) return;
+    itemEl.remove();
+
+    const remaining = _attachmentsGrid ? _attachmentsGrid.querySelectorAll('[data-att-id]').length : 0;
+    if (remaining === 0) {
+        if (_attachmentsModalInstance) _attachmentsModalInstance.hide();
+    } else {
+        updateAttachmentsTitle(remaining);
+        if (_attachmentsSourceBtn) {
+            _attachmentsSourceBtn.innerHTML = `<i class="bi bi-paperclip"></i>${remaining}`;
+            const atts = JSON.parse(_attachmentsSourceBtn.dataset.attachments)
+                .filter(a => a.id !== attId);
+            _attachmentsSourceBtn.dataset.attachments = JSON.stringify(atts);
+        }
+    }
+}
+
+function openAttachmentsModal(btn) {
+    const atts = JSON.parse(btn.dataset.attachments);
+    updateAttachmentsTitle(atts.length);
+
+    const body = document.getElementById('attachmentsModalBody');
+    body.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'd-flex flex-wrap gap-3 att-grid';
+
+    atts.forEach(att => {
+        const item = document.createElement('div');
+        item.dataset.attId = att.id;
+        item.style.cssText = 'position:relative';
+
+        if (att.mime.startsWith('image/')) {
+            item.innerHTML = `<img src="/attachments/${att.id}"
+                     style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:zoom-in"
+                     onclick="previewImage('/attachments/${att.id}')">`;
+        } else {
+            const safe = att.fname.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
+                <div style="font-size:2.5rem"><i class="bi bi-file-earmark-text"></i></div>
+                <small class="text-muted text-center"
+                       style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i>Скачать
+                </a>
+            </div>`;
+        }
+
+        // Кнопка удаления
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn btn-danger position-absolute top-0 end-0 rounded-circle p-0';
+        delBtn.style.cssText = 'width:22px;height:22px;min-width:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box';
+        delBtn.setAttribute('aria-label', 'Удалить вложение');
+        delBtn.innerHTML = '<i class="bi bi-x" aria-hidden="true"></i>';
+        delBtn.onclick = () => deleteAttachmentFromModal(att.id, item);
+        item.appendChild(delBtn);
+
+        grid.appendChild(item);
+    });
+
+    body.appendChild(grid);
+    _attachmentsGrid = grid;
+    const modalEl = document.getElementById('attachmentsModal');
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    _attachmentsSourceBtn = btn;
+    _attachmentsExpId = btn.dataset.expId || btn.getAttribute('data-exp-id');
+    _attachmentsModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalEl.addEventListener('hidden.bs.modal', function onHidden() {
+        modalEl.removeEventListener('hidden.bs.modal', onHidden);
+        if (_attachmentsSourceBtn && _attachmentsGrid && _attachmentsGrid.querySelectorAll('[data-att-id]').length === 0) {
+            _attachmentsSourceBtn.remove();
+            _attachmentsSourceBtn = null;
+        }
+    });
+    _attachmentsModalInstance.show();
+}
+
+const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+let _copyExpId = null;
+let _copyExpMonth = null;
+let _copyModalEl = null;  // фиксируем элемент при первом открытии, до любых перемещений
+
+function openCopyModal(expId, expMonth, label, amount) {
+    _copyExpId = expId;
+    _copyExpMonth = parseInt(expMonth);
+
+    // Захватываем элемент один раз, пока DOM ещё не перемещён
+    if (!_copyModalEl) {
+        _copyModalEl = document.getElementById('copyExpenseModal');
+    }
+
+    _copyModalEl.querySelector('#copyExpenseLabel').textContent = label + ' — ' + amount + ' ₽';
+
+    const grid = _copyModalEl.querySelector('#copyMonthsGrid');
+    grid.innerHTML = '';
+    for (let m = 1; m <= 12; m++) {
+        const disabled = (m === _copyExpMonth);
+        const col = document.createElement('div');
+        col.className = 'col-12';  // одна колонка — месяцы идут по порядку сверху вниз
+        col.innerHTML = `<div class="form-check">
+            <input class="form-check-input copy-month-cb" type="checkbox"
+                   value="${m}" ${disabled ? 'disabled' : ''}
+                   onchange="updateCopySubmitBtn()">
+            <label class="form-check-label ${disabled ? 'text-muted' : ''}">
+                ${MONTH_NAMES[m-1]}${disabled ? ' <span class="text-muted small">(текущий)</span>' : ''}
+            </label>
+        </div>`;
+        grid.appendChild(col);
+    }
+
+    _copyModalEl.querySelector('#copySelectAll').checked = false;
+    updateCopySubmitBtn();
+
+    if (_copyModalEl.parentElement !== document.body) document.body.appendChild(_copyModalEl);
+    bootstrap.Modal.getOrCreateInstance(_copyModalEl).show();
+}
+
+function updateCopySubmitBtn() {
+    if (!_copyModalEl) return;
+    const cbs = [..._copyModalEl.querySelectorAll('.copy-month-cb:not(:disabled)')];
+    _copyModalEl.querySelector('#copyExpenseSubmit').disabled = !cbs.some(cb => cb.checked);
+    _copyModalEl.querySelector('#copySelectAll').checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+}
+
+document.addEventListener('change', function(e) {
+    if (e.target.id === 'copySelectAll' && _copyModalEl) {
+        _copyModalEl.querySelectorAll('.copy-month-cb:not(:disabled)')
+            .forEach(cb => { cb.checked = e.target.checked; });
+        updateCopySubmitBtn();
+    }
+});
+
+async function submitCopyExpense() {
+    if (!_copyModalEl) return;
+    const months = [..._copyModalEl.querySelectorAll('.copy-month-cb:checked')]
+        .map(cb => parseInt(cb.value));
+    if (!months.length) return;
+
+    const btn = _copyModalEl.querySelector('#copyExpenseSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Копирование...';
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const res = await fetch(`/expenses/${_copyExpId}/copy`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify({months}),
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+
+        bootstrap.Modal.getInstance(_copyModalEl).hide();
+
+        const n = data.created;
+        const word = n === 1 ? 'месяц' : n < 5 ? 'месяца' : 'месяцев';
+        const alertEl = document.createElement('div');
+        alertEl.className = 'alert alert-success alert-dismissible fade show';
+        alertEl.innerHTML = `<i class="bi bi-check-circle me-1"></i>Скопировано в ${n} ${word}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        document.querySelector('.container')?.prepend(alertEl);
+        setTimeout(() => alertEl?.remove(), 4000);
+    } catch(e) {
+        alert('Ошибка: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-copy me-1"></i>Копировать';
+    }
+}
+
+async function handleAttachmentUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (!_attachmentsExpId) { alert('Не удалось определить ID расхода'); return; }
+    input.value = '';
+
+    try {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        const fd = new FormData();
+        fd.append('file', file);
+
+        const res = await fetch(`/expenses/${_attachmentsExpId}/attachments`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken},
+            body: fd,
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || 'Ошибка загрузки');
+            return;
+        }
+
+        const att = await res.json();
+
+        const grid = _attachmentsGrid;
+        if (!grid) { alert('Ошибка: grid не найден'); return; }
+
+        const item = document.createElement('div');
+        item.dataset.attId = att.id;
+        item.style.cssText = 'position:relative';
+
+        if (att.mime_type && att.mime_type.startsWith('image/')) {
+            item.innerHTML = `<img src="/attachments/${att.id}"
+                style="width:120px;height:120px;object-fit:cover;border-radius:8px;cursor:zoom-in"
+                onclick="previewImage('/attachments/${att.id}')">`;
+        } else {
+            const safe = att.filename.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            item.innerHTML = `<div class="d-flex flex-column align-items-center gap-1">
+                <div style="font-size:2.5rem"><i class="bi bi-file-earmark-text"></i></div>
+                <small class="text-muted text-center"
+                       style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${safe}</small>
+                <a href="/attachments/${att.id}" download="${safe}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-download me-1"></i>Скачать
+                </a>
+            </div>`;
+        }
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn btn-danger position-absolute top-0 end-0 rounded-circle p-0';
+        delBtn.style.cssText = 'width:22px;height:22px;min-width:22px;font-size:.8rem;line-height:22px;text-align:center;box-sizing:content-box';
+        delBtn.setAttribute('aria-label', 'Удалить вложение');
+        delBtn.innerHTML = '<i class="bi bi-x" aria-hidden="true"></i>';
+        delBtn.onclick = () => deleteAttachmentFromModal(att.id, item);
+        item.appendChild(delBtn);
+        grid.appendChild(item);
+
+        const count = _attachmentsGrid.querySelectorAll('[data-att-id]').length;
+        updateAttachmentsTitle(count);
+        if (_attachmentsSourceBtn) {
+            _attachmentsSourceBtn.innerHTML = `<i class="bi bi-paperclip"></i>${count}`;
+            const atts = JSON.parse(_attachmentsSourceBtn.dataset.attachments);
+            atts.push({id: att.id, mime: att.mime_type, fname: att.filename});
+            _attachmentsSourceBtn.dataset.attachments = JSON.stringify(atts);
+        }
+    } catch(e) {
+        alert('Ошибка: ' + e.message);
+    }
+}
+</script>
+{% endblock %}
+
+{% block modals %}
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить расход?</div>
+                <div class="text-muted small mt-1">Это действие нельзя отменить</div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4" id="confirmDeleteBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модал деталей расхода -->
+<div class="modal fade" id="expenseDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <span id="edCategoryBadge" class="badge rounded-pill fs-6"></span>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="mb-3">
+                    <div id="edDescription" class="fw-bold fs-5"></div>
+                    <div id="edNotes" class="text-muted small fst-italic mt-1"></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <div>
+                        <div class="text-muted small">Сумма</div>
+                        <div id="edAmount" class="fw-bold fs-4"></div>
+                    </div>
+                    <div class="text-end">
+                        <div class="text-muted small">Дата</div>
+                        <div id="edDate" class="fw-semibold"></div>
+                    </div>
+                </div>
+                <div id="edBadges" class="d-flex gap-2 flex-wrap mt-3"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0 justify-content-start">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="copyFromDetailBtn">
+                    <i class="bi bi-copy me-1"></i>Скопировать на другие месяцы
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="attachmentsModal" tabindex="-1" aria-labelledby="attachmentsModalTitle">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold" id="attachmentsModalTitle">Вложения</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="attachmentsModalBody"></div>
+            <div class="modal-footer border-0 pt-0">
+                <label class="btn btn-outline-primary btn-sm mb-0" id="attachmentAddBtn" style="cursor:pointer">
+                    <i class="bi bi-plus-lg me-1"></i>Добавить файл
+                    <input type="file" class="d-none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                           onchange="handleAttachmentUpload(this)">
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Модал копирования расхода по месяцам -->
+<div class="modal fade" id="copyExpenseModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <div>
+                    <h6 class="modal-title fw-semibold mb-0">
+                        <i class="bi bi-copy me-2 text-primary"></i>Копировать расход
+                    </h6>
+                    <div id="copyExpenseLabel" class="text-muted small mt-1"></div>
+                </div>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="copySelectAll">
+                    <label class="form-check-label fw-semibold" for="copySelectAll">Выбрать все месяцы</label>
+                </div>
+                <hr class="my-2">
+                <div class="row g-2" id="copyMonthsGrid"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn grad-primary btn-sm" id="copyExpenseSubmit" disabled
+                        onclick="submitCopyExpense()">
+                    <i class="bi bi-copy me-1"></i>Копировать
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+<div>
+    {% for exp in expenses %}
+    <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2{% if not exp.is_spent %} not-spent{% endif %}">
+        <div style="min-width:0;cursor:pointer;flex:1"
+             role="button"
+             tabindex="0"
+             data-exp-id="{{ exp.id }}"
+             onclick="openExpenseDetail(this)"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openExpenseDetail(this)}"
+             data-exp='{
+                "category": "{{ exp.category.name | e }}",
+                "icon": "{{ exp.category.icon }}",
+                "color": "{{ exp.category.color }}",
+                "description": {{ (exp.description or '') | tojson }},
+                "notes": {{ (exp.notes or '') | tojson }},
+                "amount": "{{ '%.2f'|format(exp.amount|float) }}",
+                "date": "{{ exp.expense_date.strftime('%d.%m.%Y') }}",
+                "is_planned": {{ exp.is_planned | tojson }},
+                "is_spent": {{ exp.is_spent | tojson }},
+                "is_savings": {{ (exp.savings_account_id is not none) | tojson }}
+             }'>
+            <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                <span class="badge rounded-pill" style="background:{{ exp.category.color }}">
+                    <i class="bi {{ exp.category.icon }} me-1"></i>{{ exp.category.name }}
+                </span>
+                {% if not exp.is_planned and not exp.savings_account %}
+                    <span class="badge bg-warning-subtle text-warning" style="font-size:.7rem">незаплан.</span>
+                {% endif %}
+                {% if not exp.is_spent %}
+                    <span class="badge bg-warning text-dark" style="font-size:.7rem"><i class="bi bi-hourglass-split me-1"></i>Не потрачено</span>
+                {% endif %}
+                {% if exp.savings_account %}
+                    <span class="badge" style="font-size:.7rem;background:{{ exp.savings_account.color }}22;color:{{ exp.savings_account.color }};border:1px solid {{ exp.savings_account.color }}55">
+                        <i class="bi bi-piggy-bank me-1"></i>{{ exp.savings_account.name }}
+                    </span>
+                {% endif %}
+            </div>
+            <div class="fw-semibold text-truncate" title="{{ exp.description or '—' }}">{{ exp.description or '—' }}</div>
+            {% if exp.notes %}
+            <div class="text-muted small fst-italic text-truncate">{{ exp.notes }}</div>
+            {% endif %}
+            <div class="text-muted small">{{ exp.expense_date.strftime('%d.%m.%Y') }}</div>
+        </div>
+        <div class="text-end flex-shrink-0">
+            <div class="fw-bold fs-6">{{ "%.2f"|format(exp.amount|float) }} ₽</div>
+            <div class="d-flex gap-1 mt-1 justify-content-end">
+                {% if exp.attachments %}
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        style="min-height:34px;padding:4px 8px"
+                        data-exp-id="{{ exp.id }}"
+                        data-exp-desc="{{ (exp.description or '—') | e }}"
+                        data-attachments='{{ att_data[exp.id] | tojson }}'
+                        onclick="openAttachmentsModal(this)">
+                    <i class="bi bi-paperclip"></i>{{ exp.attachments|length }}
+                </button>
+                {% endif %}
+                {% if exp.is_spent %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        style="min-height:34px;padding:4px 8px;font-size:.75rem"
+                        title="Отметить как «не потрачено»"
+                        onclick="toggleSpent({{ exp.id }}, this)">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+                {% else %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-success"
+                        style="min-height:34px;padding:4px 10px;font-size:.78rem"
+                        onclick="toggleSpent({{ exp.id }}, this)">
+                    <i class="bi bi-check-lg me-1"></i>Потрачено
+                </button>
+                {% endif %}
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        style="min-height:34px;padding:4px 8px"
+                        aria-label="Копировать на другие месяцы"
+                        onclick="openCopyModal({{ exp.id }}, {{ exp.expense_date.month }}, {{ (exp.description or exp.category.name) | tojson }}, '{{ '%.2f'|format(exp.amount|float) }}')">
+                    <i class="bi bi-copy" aria-hidden="true"></i>
+                </button>
+                <a href="{{ url_for('expense_edit', exp_id=exp.id, ret_year=year, ret_month=month) }}"
+                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px"
+                   aria-label="Редактировать расход">
+                    <i class="bi bi-pencil" aria-hidden="true"></i>
+                </a>
+                <form method="post" action="{{ url_for('expense_delete', exp_id=exp.id) }}"
+                      class="d-inline expense-delete-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="ret_year"  value="{{ year }}">
+                    <input type="hidden" name="ret_month" value="{{ month }}">
+                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px"
+                            aria-label="Удалить расход">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-inbox" aria-hidden="true" style="font-size:2.5rem;opacity:.3"></i>
+        <div class="mt-2">Расходов не найдено</div>
+        <a href="{{ url_for('expense_add', ret_year=year, ret_month=month) }}" class="btn grad-primary btn-sm mt-3">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Добавить первый расход
+        </a>
+    </div>
+    {% endfor %}
+
+    {% if expenses %}
+    <div class="d-flex justify-content-between align-items-center px-2 pt-2 border-top mt-2">
+        <span class="fw-bold text-muted small">Итого</span>
+        <span class="fw-bold">{{ "%.2f"|format(expenses|sum(attribute='amount')|float) }} ₽</span>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

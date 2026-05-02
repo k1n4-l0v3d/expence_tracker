@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}Трекер расходов{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💸</text></svg>">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/animations.css') }}" rel="stylesheet">
+    {% if current_user.is_authenticated %}
+    <link href="{{ url_for('static', filename='css/chat.css') }}" rel="stylesheet">
+    {% endif %}
+    <script>
+        (function() {
+            const t = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', t);
+        })();
+    </script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     NAVBAR (десктоп + шапка мобильного)
+════════════════════════════════════════════ -->
+<nav class="navbar navbar-dark navbar-animated navbar-expand-lg">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="{{ url_for('index') if current_user.is_authenticated else url_for('login') }}">
+            <i class="bi bi-wallet2 me-2"></i>Трекер расходов
+        </a>
+
+        <!-- Мобильный правый блок: тема + аватар (вместо бургера) -->
+        <div class="navbar-mobile-right">
+            {% if current_user.is_authenticated %}
+            <button class="btn btn-sm btn-outline-light" id="help-toggle-mobile" title="Инструкция"
+                    onclick="openHelp()">
+                <i class="bi bi-question-lg"></i>
+            </button>
+            {% endif %}
+            <button class="btn btn-sm btn-outline-light" id="theme-toggle-mobile" title="Сменить тему">
+                <i class="bi bi-moon-fill" id="theme-icon-mobile"></i>
+            </button>
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('profile') }}"
+               class="rounded-circle bg-white text-primary fw-bold d-inline-flex align-items-center
+                      justify-content-center text-decoration-none"
+               style="width:34px;height:34px;font-size:{% if current_user.avatar %}1.1rem{% else %}.85rem{% endif %};flex-shrink:0">
+                {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Десктопное меню -->
+        <div class="collapse navbar-collapse" id="nav">
+            <ul class="navbar-nav ms-auto align-items-center">
+                {% if current_user.is_authenticated %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}"
+                       href="{{ url_for('index', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-house me-1"></i>Обзор
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if 'expenses' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-list-ul me-1"></i>Расходы
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if 'income' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('income_list', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-arrow-down-circle me-1"></i>Доходы
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'budget' %}active{% endif %}"
+                       href="{{ url_for('budget', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-piggy-bank me-1"></i>Бюджет
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint and 'savings' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('savings_list') }}">
+                        <i class="bi bi-safe me-1"></i>Накопления
+                    </a>
+                </li>
+                <li class="nav-item ms-2 dropdown">
+                    <button class="btn btn-sm px-3 text-white pulse-btn dropdown-toggle"
+                            style="background:rgba(255,255,255,.2);border-radius:10px;border:none"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-plus-lg me-1"></i>Добавить
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                <li class="nav-item ms-2 dropdown">
+                    <a class="nav-link dropdown-toggle text-white d-flex align-items-center gap-2"
+                       href="#" data-bs-toggle="dropdown">
+                        <span class="rounded-circle bg-white text-primary fw-bold d-inline-flex
+                                     align-items-center justify-content-center"
+                              style="width:28px;height:28px;font-size:{% if current_user.avatar %}1rem{% else %}.8rem{% endif %}">
+                            {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                        </span>
+                        {{ current_user.username }}
+                        {% if current_user.is_admin %}
+                            <span class="badge bg-danger" style="font-size:.65rem">admin</span>
+                        {% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('profile') }}">
+                                <i class="bi bi-person me-2"></i>Личный кабинет
+                            </a>
+                        </li>
+                        {% if current_user.is_admin %}
+                        <li>
+                            <a class="dropdown-item text-danger" href="{{ url_for('admin_panel') }}">
+                                <i class="bi bi-shield-lock me-2"></i>Администрирование
+                            </a>
+                        </li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right me-2"></i>Выйти
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                {% endif %}
+                {% if current_user.is_authenticated %}
+                <li class="nav-item ms-1">
+                    <button class="btn btn-sm btn-outline-light" id="help-toggle" title="Инструкция"
+                            onclick="openHelp()">
+                        <i class="bi bi-question-lg"></i>
+                    </button>
+                </li>
+                {% endif %}
+                <li class="nav-item ms-2">
+                    <button class="btn btn-sm btn-outline-light" id="theme-toggle" title="Сменить тему">
+                        <i class="bi bi-moon-fill" id="theme-icon"></i>
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     КОНТЕНТ
+════════════════════════════════════════════ -->
+<div class="container my-4 page-wrapper">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+            <div class="alert alert-{{ cat }} alert-dismissible fade show stagger-item" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+<!-- ═══════════════════════════════════════════
+     НИЖНЯЯ НАВИГАЦИЯ (только мобильный)
+════════════════════════════════════════════ -->
+{% if current_user.is_authenticated %}
+<nav class="bottom-nav">
+    <a href="{{ url_for('index', year=nav_year, month=nav_month) }}"
+       class="{% if request.endpoint == 'index' %}active{% endif %}">
+        <i class="bi bi-house"></i>
+        <span>Обзор</span>
+    </a>
+    <a href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}"
+       class="{% if 'expenses' in request.endpoint %}active{% endif %}">
+        <i class="bi bi-list-ul"></i>
+        <span>Расходы</span>
+    </a>
+    <div class="dropup">
+        <button class="add-btn" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <ul class="dropdown-menu mb-2" style="min-width:160px;left:50%;transform:translateX(-50%)">
+            <li>
+                <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                </a>
+            </li>
+        </ul>
+    </div>
+    <a href="{{ url_for('income_list', year=nav_year, month=nav_month) }}"
+       class="{% if 'income' in request.endpoint %}active{% endif %}">
+        <i class="bi bi-arrow-down-circle"></i>
+        <span>Доходы</span>
+    </a>
+    <a href="{{ url_for('budget', year=nav_year, month=nav_month) }}"
+       class="{% if request.endpoint == 'budget' %}active{% endif %}">
+        <i class="bi bi-piggy-bank"></i>
+        <span>Бюджет</span>
+    </a>
+</nav>
+{% endif %}
+
+{% block modals %}{% endblock %}
+
+{% if current_user.is_authenticated %}
+<!-- ═══ Инструкция ════════════════════════════════════════════════════ -->
+<div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <div>
+                    <h5 class="modal-title fw-bold" id="helpModalLabel">
+                        <i class="bi bi-map text-primary me-2"></i>Как пользоваться трекером
+                    </h5>
+                    <div class="text-muted small">Быстрый обзор всех возможностей</div>
+                </div>
+                <button type="button" class="btn-close ms-3" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-3">
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#0d6efd22;color:#0d6efd">
+                                <i class="bi bi-bar-chart-line-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Обзор</div>
+                                <div class="text-muted small">Главная страница — баланс месяца (доходы минус расходы), разбивка по категориям, диаграмма и статистика за 3 месяца. Переключайте месяц фильтром вверху.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#dc354522;color:#dc3545">
+                                <i class="bi bi-list-ul"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Расходы</div>
+                                <div class="text-muted small">Добавляйте расходы через «+ Добавить». Отмечайте ✅ оплаченные — только они учитываются в балансе. Копируйте повторяющиеся на другие месяцы.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#19875422;color:#198754">
+                                <i class="bi bi-arrow-down-circle-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Доходы</div>
+                                <div class="text-muted small">Фиксируйте все поступления: зарплата, фриланс, подработки. Они участвуют в расчёте баланса и дневного бюджета.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#6610f222;color:#6610f2">
+                                <i class="bi bi-piggy-bank-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Бюджет</div>
+                                <div class="text-muted small">Задайте лимиты по категориям на месяц. На главной странице прогресс-бар покажет, сколько осталось в каждой категории.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#0dcaf022;color:#0dcaf0">
+                                <i class="bi bi-safe-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Накопления</div>
+                                <div class="text-muted small">Создавайте счета с целью (отпуск, машина…). Пополнение уменьшает доступный баланс месяца. Снятие — возвращает. История — на странице «Накопления».</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#fd7e1422;color:#fd7e14">
+                                <i class="bi bi-calendar-check-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Дневной бюджет</div>
+                                <div class="text-muted small">Нажмите на карточку «Можно тратить в день» и укажите даты аванса и зарплаты. Трекер посчитает, сколько тратить ежедневно до ближайшей выплаты.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#20c99722;color:#20c997">
+                                <i class="bi bi-copy"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Копирование данных</div>
+                                <div class="text-muted small">В начале нового месяца появится кнопка «Скопировать данные с прошлого месяца» — она перенесёт плановые расходы и доходы.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#ffc10722;color:#ffc107">
+                                <i class="bi bi-file-earmark-excel-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Экспорт / Импорт</div>
+                                <div class="text-muted small">В «Личном кабинете» скачайте все данные в Excel или загрузите из файла. Удобно для переноса данных или резервной копии.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="alert alert-primary d-flex gap-2 mt-3 mb-0 py-2 px-3" style="font-size:.85rem">
+                    <i class="bi bi-lightbulb-fill flex-shrink-0 mt-1"></i>
+                    <span>Категории, цвета и иконки настраиваются прямо при добавлении расхода — нажмите «+ Новая категория» в форме.</span>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-1 justify-content-between">
+                <label class="d-flex align-items-center gap-2 text-muted small" style="cursor:pointer">
+                    <input type="checkbox" id="helpDontShow" onchange="toggleDontShow(this)">
+                    Больше не показывать
+                </label>
+                <button type="button" class="btn grad-primary btn-sm px-4"
+                        data-bs-dismiss="modal">Понятно!</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.help-card {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--bs-tertiary-bg);
+    height: 100%;
+}
+.help-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+</style>
+
+<script>
+function openHelp() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('helpModal')).show();
+}
+
+function toggleDontShow(cb) {
+    localStorage.setItem('helpDontShow', cb.checked ? '1' : '0');
+}
+
+// Автопоказ для новых пользователей
+(function () {
+    if (localStorage.getItem('helpDontShow') === '1') return;
+    if (localStorage.getItem('helpSeen')) return;
+    localStorage.setItem('helpSeen', '1');
+    window.addEventListener('DOMContentLoaded', function () {
+        setTimeout(() => {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('helpModal')).show();
+        }, 800);
+    });
+})();
+</script>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/animations.js') }}"></script>
+{% block scripts %}{% endblock %}
+<script>
+    // Применяем тему ко всем кнопкам-переключателям
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(el => {
+            el.className = 'bi ' + (theme === 'dark' ? 'bi-sun-fill' : 'bi-moon-fill') + ' theme-icon';
+        });
+    }
+
+    // Инициализация
+    applyTheme(localStorage.getItem('theme') || 'light');
+
+    // Вешаем обработчик на все кнопки смены темы
+    document.querySelectorAll('#theme-toggle, #theme-toggle-mobile').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.style.transition = 'transform 0.35s ease';
+                icon.style.transform  = 'rotate(360deg)';
+                setTimeout(() => { icon.style.transform = ''; }, 350);
+            }
+            const next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+            if (document.startViewTransition) {
+                document.startViewTransition(() => applyTheme(next));
+            } else {
+                applyTheme(next);
+            }
+        });
+    });
+
+    // Обновляем классы иконок (теперь через общий класс)
+    document.querySelectorAll('#theme-toggle i, #theme-toggle-mobile i').forEach(el => {
+        el.classList.add('theme-icon');
+    });
+    applyTheme(localStorage.getItem('theme') || 'light');
+
+    // Закрывать dropdown при скролле (мобильный) — с анимацией
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.dropdown-menu.show:not(.hiding)').forEach(menu => {
+            const toggle = menu.closest('.dropdown, .dropup')?.querySelector('[data-bs-toggle="dropdown"]');
+            if (!toggle) return;
+            menu.classList.add('hiding');
+            setTimeout(() => {
+                menu.classList.remove('hiding');
+                bootstrap.Dropdown.getInstance(toggle)?.hide();
+            }, 180);
+        });
+    }, { passive: true });
+
+    // Плавные переходы между страницами
+    if (document.startViewTransition) {
+        document.addEventListener('click', e => {
+            const a = e.target.closest('a[href]');
+            if (!a) return;
+            const url = a.getAttribute('href');
+            if (!url || url.startsWith('#') || url.startsWith('http') || a.target === '_blank') return;
+            e.preventDefault();
+            document.startViewTransition(() => { window.location.href = url; });
+        });
+    }
+</script>
+
+{% if reminders %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  {% for exp in reminders %}
+  <div class="toast" id="reminder-toast-{{ exp.id }}" role="alert" data-bs-autohide="true" data-bs-delay="8000">
+    <div class="toast-header">
+      <strong class="me-auto"><i class="bi bi-bell me-1"></i>Завтра расход</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Закрыть"></button>
+    </div>
+    <div class="toast-body">
+      {{ exp.description or exp.category.name }} — <strong>{{ "%.0f"|format(exp.amount|float) }} ₽</strong>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<script>
+document.querySelectorAll('.toast[id^="reminder-toast-"]').forEach(function(el) {
+    var key = 'shown_' + el.id;
+    if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        new bootstrap.Toast(el).show();
+    }
+});
+</script>
+{% endif %}
+{% if current_user.is_authenticated %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endif %}
+</body>
+</html>

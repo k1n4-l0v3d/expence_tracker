@@ -1,0 +1,2634 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, send_file
+from urllib.parse import urlparse, urljoin
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import (LoginManager, UserMixin, login_user, logout_user,
+                         login_required, current_user)
+from flask_wtf.csrf import CSRFProtect
+from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import extract, func
+from sqlalchemy.orm import joinedload
+from functools import wraps
+import os
+import io
+import json
+import random
+import calendar
+import re
+import threading
+import openpyxl
+from groq import Groq
+from openpyxl.styles import Font
+
+
+class RateLimiter:
+    def __init__(self, max_attempts: int = 10, block_minutes: int = 5):
+        self._data: dict = {}
+        self._lock = threading.Lock()
+        self.max_attempts = max_attempts
+        self.block_minutes = block_minutes
+
+    def is_blocked(self, ip: str) -> tuple:
+        """Returns (is_blocked: bool, minutes_remaining: int)."""
+        with self._lock:
+            entry = self._data.get(ip)
+            if not entry:
+                return False, 0
+            blocked_until = entry.get("blocked_until")
+            now = datetime.now(timezone.utc)
+            if blocked_until and now < blocked_until:
+                remaining = int((blocked_until - now).total_seconds() // 60) + 1
+                return True, remaining
+            return False, 0
+
+    def record_failure(self, ip: str) -> None:
+        with self._lock:
+            entry = self._data.setdefault(ip, {"count": 0, "blocked_until": None})
+            entry["count"] += 1
+            if entry["count"] >= self.max_attempts:
+                entry["blocked_until"] = datetime.now(timezone.utc) + timedelta(minutes=self.block_minutes)
+
+    def reset(self, ip: str) -> None:
+        with self._lock:
+            self._data.pop(ip, None)
+
+
+rate_limiter = RateLimiter()
+
+
+def generate_captcha() -> tuple:
+    """Return (question_str, answer_int) for a random arithmetic problem."""
+    op = random.choice(['+', '-', '×'])
+    if op == '+':
+        a, b = random.randint(1, 20), random.randint(1, 20)
+        return f"{a} + {b}", a + b
+    elif op == '-':
+        a = random.randint(2, 20)
+        b = random.randint(1, a)
+        return f"{a} - {b}", a - b
+    else:  # ×
+        a, b = random.randint(1, 10), random.randint(1, 10)
+        return f"{a} × {b}", a * b
+
+
+def get_client_ip() -> str:
+    """Return real client IP, handling X-Forwarded-For from reverse proxies."""
+    forwarded = request.headers.get('X-Forwarded-For')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+load_dotenv()
+
+app = Flask(__name__)
+flask_app = app  # alias for tests
+
+
+def is_safe_url(target):
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret')
+
+db           = SQLAlchemy(app)
+csrf         = CSRFProtect(app)
+login_manager = LoginManager(app)
+login_manager.login_view     = 'login'
+login_manager.login_message  = 'Войдите, чтобы продолжить.'
+login_manager.login_message_category = 'warning'
+
+
+# ─── Модели ───────────────────────────────────────────────────────────────────
+
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+
+    id            = db.Column(db.Integer, primary_key=True)
+    username      = db.Column(db.String(64),  nullable=False, unique=True)
+    email         = db.Column(db.String(120), nullable=False, unique=True)
+    password_hash = db.Column(db.String(256), nullable=False)
+    role          = db.Column(db.String(10),  nullable=False, default='user')   # 'admin' | 'user'
+    status        = db.Column(db.String(10),  nullable=False, default='active') # 'active' | 'warned' | 'banned'
+    warning_count = db.Column(db.Integer, nullable=False, default=0)
+    warning_note  = db.Column(db.Text)
+    ban_reason    = db.Column(db.Text)
+    avatar        = db.Column(db.String(10), nullable=True)
+    salary_day    = db.Column(db.Integer, nullable=True)
+    advance_day   = db.Column(db.Integer, nullable=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_seen     = db.Column(db.DateTime)
+
+    expenses = db.relationship('Expense',       backref='user', lazy='dynamic')
+    incomes  = db.relationship('Income',        backref='user', lazy='dynamic')
+    budgets  = db.relationship('MonthlyBudget', backref='user', lazy='dynamic')
+
+    def set_password(self, password: str):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == 'admin'
+
+    @property
+    def is_banned(self) -> bool:
+        return self.status == 'banned'
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+class Category(db.Model):
+    __tablename__ = 'categories'
+
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    color       = db.Column(db.String(7), nullable=False, default='#6c757d')
+    icon        = db.Column(db.String(50), default='bi-wallet2')
+    is_active   = db.Column(db.Boolean, nullable=False, default=True)
+    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    expenses = db.relationship('Expense',       backref='category', lazy=True)
+    budgets  = db.relationship('MonthlyBudget', backref='category', lazy=True)
+    user     = db.relationship('User', backref=db.backref('custom_categories', lazy='dynamic'))
+
+
+class SavingsAccount(db.Model):
+    __tablename__ = 'savings_accounts'
+
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name          = db.Column(db.String(100), nullable=False)
+    color         = db.Column(db.String(7),  nullable=False, default='#0d6efd')
+    icon          = db.Column(db.String(50), nullable=False, default='bi-piggy-bank')
+    target_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    is_active     = db.Column(db.Boolean, nullable=False, default=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    image_data    = db.Column(db.LargeBinary, nullable=True)
+    image_mime    = db.Column(db.String(50),  nullable=True)
+
+    user = db.relationship('User', backref=db.backref('savings_accounts', lazy='dynamic'))
+
+
+class MonthlyBudget(db.Model):
+    __tablename__ = 'monthly_budgets'
+
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
+    year        = db.Column(db.SmallInteger, nullable=False)
+    month       = db.Column(db.SmallInteger, nullable=False)
+    amount      = db.Column(db.Numeric(12, 2), nullable=False)
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'category_id', 'year', 'month'),)
+
+
+class Income(db.Model):
+    __tablename__ = 'incomes'
+
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    amount      = db.Column(db.Numeric(12, 2), nullable=False)
+    source      = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(255))
+    income_date = db.Column(db.Date, nullable=False, default=date.today)
+    notes       = db.Column(db.Text)
+    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    savings_account_id = db.Column(db.Integer, db.ForeignKey('savings_accounts.id'), nullable=True)
+    savings_account    = db.relationship('SavingsAccount', foreign_keys=[savings_account_id])
+
+
+class Expense(db.Model):
+    __tablename__ = 'expenses'
+
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    category_id  = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
+    amount       = db.Column(db.Numeric(12, 2), nullable=False)
+    description  = db.Column(db.String(255))
+    expense_date = db.Column(db.Date, nullable=False, default=date.today)
+    is_planned   = db.Column(db.Boolean, nullable=False, default=True)
+    is_spent     = db.Column(db.Boolean, nullable=False, default=True)
+    notes        = db.Column(db.Text)
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                             onupdate=datetime.utcnow)
+
+    savings_account_id = db.Column(db.Integer, db.ForeignKey('savings_accounts.id'), nullable=True)
+    savings_account    = db.relationship('SavingsAccount', foreign_keys=[savings_account_id])
+
+    attachments  = db.relationship('ExpenseAttachment', backref='expense',
+                                   lazy=True, cascade='all, delete-orphan')
+
+
+class ExpenseAttachment(db.Model):
+    __tablename__ = 'expense_attachments'
+
+    id         = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer,
+                           db.ForeignKey('expenses.id', ondelete='CASCADE'),
+                           nullable=False)
+    filename   = db.Column(db.String(255), nullable=False)
+    mime_type  = db.Column(db.String(100), nullable=False)
+    data       = db.Column(db.LargeBinary, nullable=False)
+    size       = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+# ─── Декораторы ───────────────────────────────────────────────────────────────
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin:
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+
+def ban_check(f):
+    """Блокируем забаненных пользователей на всех страницах приложения."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if current_user.is_authenticated and current_user.is_banned:
+            logout_user()
+            flash('Ваш аккаунт заблокирован.', 'danger')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.before_request
+def update_last_seen():
+    if current_user.is_authenticated:
+        current_user.last_seen = datetime.utcnow()
+        db.session.commit()
+
+
+# ─── Хелперы ──────────────────────────────────────────────────────────────────
+
+def get_monthly_income(user_id: int, year: int, month: int) -> float:
+    total = db.session.query(func.coalesce(func.sum(Income.amount), 0)).filter(
+        Income.user_id == user_id,
+        extract('year',  Income.income_date) == year,
+        extract('month', Income.income_date) == month,
+        Income.savings_account_id.is_(None),
+    ).scalar()
+    return float(total)
+
+
+def get_monthly_summary(user_id: int, year: int, month: int):
+    rows = (
+        db.session.query(
+            Category.id,
+            Category.name,
+            Category.color,
+            Category.icon,
+            func.coalesce(func.sum(Expense.amount), 0).label('total'),
+        )
+        .outerjoin(
+            Expense,
+            (Expense.category_id == Category.id)
+            & (Expense.user_id == user_id)
+            & (Expense.is_spent.is_(True))
+            & (extract('year',  Expense.expense_date) == year)
+            & (extract('month', Expense.expense_date) == month),
+        )
+        .filter(
+            Category.is_active.is_(True),
+            db.or_(Category.user_id.is_(None), Category.user_id == user_id)
+        )
+        .group_by(Category.id, Category.name, Category.color, Category.icon)
+        .order_by(func.coalesce(func.sum(Expense.amount), 0).desc())
+        .all()
+    )
+    return rows
+
+
+def get_budget_map(user_id: int, year: int, month: int) -> dict:
+    budgets = MonthlyBudget.query.filter_by(user_id=user_id, year=year, month=month).all()
+    return {b.category_id: float(b.amount) for b in budgets}
+
+
+def get_account_balance(account_id: int) -> float:
+    """Balance = sum of remaining deposit Expense records for the account."""
+    total = db.session.query(
+        func.coalesce(func.sum(Expense.amount), 0)
+    ).filter(Expense.savings_account_id == account_id).scalar()
+    return float(total)
+
+
+def get_savings_category() -> 'Category':
+    """Return (creating if absent) the global system category «Накопления»."""
+    cat = Category.query.filter_by(name='Накопления', user_id=None).first()
+    if not cat:
+        cat = Category(name='Накопления', icon='bi-piggy-bank', color='#0d6efd', user_id=None)
+        db.session.add(cat)
+        db.session.flush()
+    return cat
+
+
+def months_list():
+    return [(m, datetime(2000, m, 1).strftime('%B')) for m in range(1, 13)]
+
+
+def adjust_day(day: int, year: int, month: int) -> int:
+    return min(day, calendar.monthrange(year, month)[1])
+
+
+def _last_day_of_month(d: date) -> date:
+    next_month = d.replace(day=28) + timedelta(days=4)
+    return next_month.replace(day=1) - timedelta(days=1)
+
+
+def next_payment_date(day: int) -> date:
+    today = date.today()
+    last = _last_day_of_month(today)
+    clamped_day = min(day, last.day)
+    candidate = today.replace(day=clamped_day)
+    if candidate <= today:
+        first_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+        last_next = _last_day_of_month(first_next)
+        candidate = first_next.replace(day=min(day, last_next.day))
+    return candidate
+
+
+def get_daily_budget_info(balance: float, salary_day, advance_day):
+    options = []
+    if salary_day:
+        options.append((next_payment_date(salary_day), 'зарплаты'))
+    if advance_day:
+        options.append((next_payment_date(advance_day), 'аванса'))
+    if not options:
+        return None
+    nearest_date, payment_type = min(options, key=lambda x: x[0])
+    today = date.today()
+    days_left = max((nearest_date - today).days, 1)
+    return {
+        'daily': round(balance / days_left, 2),
+        'days_left': days_left,
+        'payment_type': payment_type,
+        'nearest_date': nearest_date,
+    }
+
+
+# ─── Авторизация ──────────────────────────────────────────────────────────────
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+
+    if request.method == 'GET':
+        question, answer = generate_captcha()
+        session['captcha_answer'] = answer
+        return render_template('auth/register.html', captcha_question=question)
+
+    # ── POST ──────────────────────────────────────────────────────────
+    ip = get_client_ip()
+
+    # 1. Honeypot
+    if request.form.get('website', ''):
+        question, answer = generate_captcha()
+        session['captcha_answer'] = answer
+        return render_template('auth/register.html', captcha_question=question)
+
+    # 2. Rate limit
+    blocked, minutes = rate_limiter.is_blocked(ip)
+    if blocked:
+        flash(f'Слишком много попыток. Попробуйте через {minutes} мин.', 'danger')
+        question, answer = generate_captcha()
+        session['captcha_answer'] = answer
+        return render_template('auth/register.html', captcha_question=question)
+
+    # 3. Captcha
+    try:
+        user_answer = int(request.form.get('captcha', ''))
+    except (ValueError, TypeError):
+        user_answer = None
+
+    if user_answer != session.get('captcha_answer'):
+        flash('Неверный ответ на капчу.', 'danger')
+        question, answer = generate_captcha()
+        session['captcha_answer'] = answer
+        return render_template('auth/register.html', captcha_question=question)
+
+    # 4. Existing validation
+    username = request.form['username'].strip()
+    email    = request.form['email'].strip().lower()
+    password = request.form['password']
+    confirm  = request.form['confirm']
+
+    if password != confirm:
+        flash('Пароли не совпадают.', 'danger')
+        rate_limiter.record_failure(ip)
+    elif User.query.filter_by(username=username).first():
+        flash('Имя пользователя уже занято.', 'danger')
+        rate_limiter.record_failure(ip)
+    elif User.query.filter_by(email=email).first():
+        flash('Email уже зарегистрирован.', 'danger')
+        rate_limiter.record_failure(ip)
+    else:
+        role = 'admin' if User.query.count() == 0 else 'user'
+        user = User(username=username, email=email, role=role)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        login_user(user)
+        rate_limiter.reset(ip)
+        flash(f'Добро пожаловать, {username}!{"  Вы — администратор." if role == "admin" else ""}', 'success')
+        return redirect(url_for('index'))
+
+    question, answer = generate_captcha()
+    session['captcha_answer'] = answer
+    return render_template('auth/register.html', captcha_question=question)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+
+    if request.method == 'GET':
+        return render_template('auth/login.html')
+
+    # ── POST ──────────────────────────────────────────────────────────
+    ip = get_client_ip()
+
+    # 1. Honeypot
+    if request.form.get('website', ''):
+        return render_template('auth/login.html')
+
+    # 2. Rate limit
+    blocked, minutes = rate_limiter.is_blocked(ip)
+    if blocked:
+        flash(f'Слишком много попыток. Попробуйте через {minutes} мин.', 'danger')
+        return render_template('auth/login.html')
+
+    # 3. Auth logic
+    username = request.form['username'].strip()
+    password = request.form['password']
+    user = User.query.filter_by(username=username).first()
+
+    if user and user.check_password(password):
+        if user.is_banned:
+            flash(f'Аккаунт заблокирован. Причина: {user.ban_reason or "не указана"}.', 'danger')
+            rate_limiter.record_failure(ip)
+        else:
+            login_user(user, remember=request.form.get('remember') == 'on')
+            rate_limiter.reset(ip)
+            flash(f'Вы вошли как {user.username}.', 'success')
+            next_page = request.args.get('next')
+            if next_page and not is_safe_url(next_page):
+                next_page = None
+            return redirect(next_page or url_for('index'))
+    else:
+        flash('Неверное имя пользователя или пароль.', 'danger')
+        rate_limiter.record_failure(ip)
+
+    return render_template('auth/login.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Вы вышли из системы.', 'info')
+    return redirect(url_for('login'))
+
+
+# ─── Личный кабинет ───────────────────────────────────────────────────────────
+
+@app.route('/profile')
+@login_required
+@ban_check
+def profile():
+    today = date.today()
+    total_expenses = db.session.query(func.coalesce(func.sum(Expense.amount), 0))\
+        .filter(Expense.user_id == current_user.id).scalar()
+    total_income = db.session.query(func.coalesce(func.sum(Income.amount), 0))\
+        .filter(Income.user_id == current_user.id,
+                Income.savings_account_id.is_(None)).scalar()
+    expense_count = Expense.query.filter_by(user_id=current_user.id).count()
+    income_count  = Income.query.filter_by(user_id=current_user.id).count()
+
+    # Годы с данными для выпадающего списка в экспорте
+    exp_years = [r[0] for r in db.session.query(extract('year', Expense.expense_date).label('y'))
+                 .filter(Expense.user_id == current_user.id).distinct().all()]
+    inc_years = [r[0] for r in db.session.query(extract('year', Income.income_date).label('y'))
+                 .filter(Income.user_id == current_user.id).distinct().all()]
+    export_years = sorted(set(exp_years) | set(inc_years) | {today.year}, reverse=True)
+
+    return render_template('profile.html',
+                           total_expenses=float(total_expenses),
+                           total_income=float(total_income),
+                           expense_count=expense_count,
+                           income_count=income_count,
+                           today=today,
+                           current_year=today.year,
+                           export_years=export_years)
+
+
+@app.route('/profile/change-password', methods=['POST'])
+@login_required
+def change_password():
+    old = request.form['old_password']
+    new = request.form['new_password']
+    confirm = request.form['confirm']
+    if not current_user.check_password(old):
+        flash('Старый пароль неверен.', 'danger')
+    elif new != confirm:
+        flash('Новые пароли не совпадают.', 'danger')
+    elif len(new) < 6:
+        flash('Пароль должен быть не менее 6 символов.', 'danger')
+    else:
+        current_user.set_password(new)
+        db.session.commit()
+        flash('Пароль изменён.', 'success')
+    return redirect(url_for('profile'))
+
+
+@app.route('/profile/avatar', methods=['POST'])
+@login_required
+def change_avatar():
+    ALLOWED = {
+        '😊','😎','🤓','🥳','😄','😇','🦊','🐱','🐶','🐸',
+        '🦁','🐼','🐨','🦄','🐯','🦅','🦋','🌟','🎮','🎯',
+        '🎸','🚀','⚡','🌙','🔥','💎','🍀','👾','🎃','🌈',
+    }
+    emoji = request.form.get('avatar', '').strip()
+    if emoji not in ALLOWED:
+        flash('Недопустимая аватарка.', 'danger')
+        return redirect(url_for('profile'))
+    current_user.avatar = emoji
+    db.session.commit()
+    flash('Аватарка обновлена!', 'success')
+    return redirect(url_for('profile'))
+
+
+@app.route('/profile/export')
+@login_required
+@ban_check
+def profile_export():
+    today = date.today()
+    try:
+        year = int(request.args.get('year', today.year))
+    except (ValueError, TypeError):
+        year = today.year
+    try:
+        month = int(request.args.get('month', 0))
+        if month not in range(0, 13):
+            month = 0
+    except (ValueError, TypeError):
+        month = 0
+
+    exp_q = Expense.query.filter(
+        Expense.user_id == current_user.id,
+        extract('year', Expense.expense_date) == year,
+        Expense.savings_account_id.is_(None),
+    )
+    inc_q = Income.query.filter(
+        Income.user_id == current_user.id,
+        extract('year', Income.income_date) == year,
+        Income.savings_account_id.is_(None),
+    )
+    if month:
+        exp_q = exp_q.filter(extract('month', Expense.expense_date) == month)
+        inc_q = inc_q.filter(extract('month', Income.income_date) == month)
+
+    expenses = exp_q.join(Category).order_by(Expense.expense_date).all()
+    incomes  = inc_q.order_by(Income.income_date).all()
+
+    wb = openpyxl.Workbook()
+
+    # ── Лист «Расходы» ────────────────────────────────────────────
+    ws_exp = wb.active
+    ws_exp.title = 'Расходы'
+    exp_headers = ['Дата', 'Категория', 'Сумма', 'Описание', 'Плановый', 'Оплачен', 'Заметки']
+    ws_exp.append(exp_headers)
+    for cell in ws_exp[1]:
+        cell.font = Font(bold=True)
+
+    for exp in expenses:
+        ws_exp.append([
+            exp.expense_date.strftime('%d.%m.%Y'),
+            exp.category.name,
+            float(exp.amount),
+            exp.description or '',
+            'Да' if exp.is_planned else 'Нет',
+            'Да' if exp.is_spent  else 'Нет',
+            exp.notes or '',
+        ])
+
+    for col in ws_exp.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_exp.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Доходы» ────────────────────────────────────────────
+    ws_inc = wb.create_sheet('Доходы')
+    inc_headers = ['Дата', 'Источник', 'Сумма', 'Описание', 'Заметки']
+    ws_inc.append(inc_headers)
+    for cell in ws_inc[1]:
+        cell.font = Font(bold=True)
+
+    for inc in incomes:
+        ws_inc.append([
+            inc.income_date.strftime('%d.%m.%Y'),
+            inc.source,
+            float(inc.amount),
+            inc.description or '',
+            inc.notes or '',
+        ])
+
+    for col in ws_inc.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_inc.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Бюджет» ────────────────────────────────────────────
+    bud_q = (MonthlyBudget.query
+             .filter(MonthlyBudget.user_id == current_user.id,
+                     MonthlyBudget.year == year)
+             .join(Category)
+             .order_by(MonthlyBudget.month, Category.name))
+    if month:
+        bud_q = bud_q.filter(MonthlyBudget.month == month)
+    budgets = bud_q.all()
+
+    ws_bud = wb.create_sheet('Бюджет')
+    bud_headers = ['Год', 'Месяц', 'Категория', 'Сумма']
+    ws_bud.append(bud_headers)
+    for cell in ws_bud[1]:
+        cell.font = Font(bold=True)
+
+    for b in budgets:
+        ws_bud.append([b.year, b.month, b.category.name, float(b.amount)])
+
+    for col in ws_bud.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_bud.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Накопления» (счета) ─────────────────────────────────
+    sav_accounts = SavingsAccount.query.filter_by(
+        user_id=current_user.id, is_active=True
+    ).order_by(SavingsAccount.name).all()
+
+    ws_sav = wb.create_sheet('Накопления')
+    ws_sav.append(['Название', 'Цвет', 'Иконка', 'Целевая сумма', 'Баланс'])
+    for cell in ws_sav[1]:
+        cell.font = Font(bold=True)
+    for acc in sav_accounts:
+        ws_sav.append([
+            acc.name,
+            acc.color,
+            acc.icon,
+            float(acc.target_amount) if acc.target_amount else '',
+            get_account_balance(acc.id),
+        ])
+    for col in ws_sav.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_sav.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    # ── Лист «Нак. Операции» (пополнения) ────────────────────────
+    sav_deps = (Expense.query
+                .filter(Expense.user_id == current_user.id,
+                        Expense.savings_account_id.isnot(None))
+                .options(joinedload(Expense.savings_account))
+                .order_by(Expense.expense_date).all())
+
+    ws_sav_ops = wb.create_sheet('Нак. Операции')
+    ws_sav_ops.append(['Дата', 'Счёт', 'Сумма', 'Описание'])
+    for cell in ws_sav_ops[1]:
+        cell.font = Font(bold=True)
+    for dep in sav_deps:
+        ws_sav_ops.append([
+            dep.expense_date.strftime('%d.%m.%Y'),
+            dep.savings_account.name if dep.savings_account else '',
+            float(dep.amount),
+            dep.description or '',
+        ])
+    for col in ws_sav_ops.columns:
+        width = max(len(str(cell.value or '')) for cell in col) + 4
+        ws_sav_ops.column_dimensions[col[0].column_letter].width = min(width, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    month_names = ['','янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек']
+    filename = f'расходы_доходы_{year}_{month_names[month]}.xlsx' if month else f'расходы_доходы_{year}.xlsx'
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+
+@app.route('/profile/import', methods=['POST'])
+@login_required
+@ban_check
+def profile_import():
+    f = request.files.get('file')
+    if not f or not f.filename:
+        flash('Файл не выбран.', 'danger')
+        return redirect(url_for('profile'))
+
+    if not f.filename.lower().endswith('.xlsx'):
+        flash('Допускается только формат .xlsx.', 'danger')
+        return redirect(url_for('profile'))
+
+    data = f.read()
+    if len(data) > 5 * 1024 * 1024:
+        flash('Файл слишком большой (максимум 5 МБ).', 'danger')
+        return redirect(url_for('profile'))
+
+    try:
+        wb = openpyxl.load_workbook(filename=io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        flash('Не удалось прочитать файл. Убедитесь, что это корректный .xlsx.', 'danger')
+        return redirect(url_for('profile'))
+
+    exp_count = inc_count = skipped = sav_count = sav_ops_count = 0
+
+    # ── Импорт расходов ───────────────────────────────────────────
+    if 'Расходы' in wb.sheetnames:
+        ws = wb['Расходы']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, cat_name, amount_val = vals[0], vals[1], vals[2]
+            desc    = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+            planned = str(vals[4]).strip().lower() == 'да' if len(vals) > 4 and vals[4] else False
+            spent   = str(vals[5]).strip().lower() == 'да' if len(vals) > 5 and vals[5] else True
+            notes   = str(vals[6]).strip() if len(vals) > 6 and vals[6] else ''
+
+            try:
+                if isinstance(date_str, date):
+                    exp_date = date_str
+                else:
+                    exp_date = datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            cat_name_str = str(cat_name).strip() if cat_name else 'Прочее'
+            if not cat_name_str:
+                cat_name_str = 'Прочее'
+
+            category = Category.query.filter(
+                db.func.lower(Category.name) == cat_name_str.lower(),
+                db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+                Category.is_active.is_(True),
+            ).first()
+
+            if not category:
+                category = Category(name=cat_name_str, user_id=current_user.id)
+                db.session.add(category)
+                db.session.flush()
+
+            db.session.add(Expense(
+                user_id      = current_user.id,
+                category_id  = category.id,
+                amount       = amount,
+                description  = desc or None,
+                expense_date = exp_date,
+                is_planned   = planned,
+                is_spent     = spent,
+                notes        = notes or None,
+            ))
+            exp_count += 1
+
+    # ── Импорт доходов ────────────────────────────────────────────
+    if 'Доходы' in wb.sheetnames:
+        ws = wb['Доходы']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, source_val, amount_val = vals[0], vals[1], vals[2]
+            desc  = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+            notes = str(vals[4]).strip() if len(vals) > 4 and vals[4] else ''
+
+            try:
+                if isinstance(date_str, date):
+                    inc_date = date_str
+                else:
+                    inc_date = datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            source = str(source_val).strip() if source_val else ''
+            if not source:
+                skipped += 1
+                continue
+
+            db.session.add(Income(
+                user_id     = current_user.id,
+                amount      = amount,
+                source      = source,
+                description = desc or None,
+                income_date = inc_date,
+                notes       = notes or None,
+            ))
+            inc_count += 1
+
+    # ── Импорт бюджета ────────────────────────────────────────────
+    bud_count = 0
+    if 'Бюджет' in wb.sheetnames:
+        ws = wb['Бюджет']
+        rows = iter(ws.rows)
+        next(rows, None)  # пропустить заголовок
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 4:
+                skipped += 1
+                continue
+            year_val, month_val, cat_name, amount_val = vals[0], vals[1], vals[2], vals[3]
+
+            try:
+                bud_year  = int(year_val)
+                bud_month = int(month_val)
+                if not (1 <= bud_month <= 12) or bud_year < 2000:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            cat_name_str = str(cat_name).strip() if cat_name else 'Прочее'
+            if not cat_name_str:
+                cat_name_str = 'Прочее'
+
+            category = Category.query.filter(
+                db.func.lower(Category.name) == cat_name_str.lower(),
+                db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+                Category.is_active.is_(True),
+            ).first()
+
+            if not category:
+                category = Category(name=cat_name_str, user_id=current_user.id)
+                db.session.add(category)
+                db.session.flush()
+
+            # Upsert: обновить если уже есть, иначе создать
+            existing = MonthlyBudget.query.filter_by(
+                user_id=current_user.id,
+                category_id=category.id,
+                year=bud_year,
+                month=bud_month,
+            ).first()
+
+            if existing:
+                existing.amount = amount
+            else:
+                db.session.add(MonthlyBudget(
+                    user_id=current_user.id,
+                    category_id=category.id,
+                    year=bud_year,
+                    month=bud_month,
+                    amount=amount,
+                ))
+            bud_count += 1
+
+    # ── Импорт накопительных счетов ──────────────────────────────
+    if 'Накопления' in wb.sheetnames:
+        ws = wb['Накопления']
+        rows = iter(ws.rows)
+        next(rows, None)
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if not vals or not vals[0]:
+                skipped += 1
+                continue
+            name = str(vals[0]).strip()
+            if not name:
+                skipped += 1
+                continue
+            color = str(vals[1]).strip() if len(vals) > 1 and vals[1] else '#0d6efd'
+            if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+                color = '#0d6efd'
+            icon = str(vals[2]).strip() if len(vals) > 2 and vals[2] else 'bi-piggy-bank'
+            target = None
+            if len(vals) > 3 and vals[3]:
+                try:
+                    target = float(vals[3])
+                    if target <= 0:
+                        target = None
+                except (ValueError, TypeError):
+                    target = None
+
+            existing = SavingsAccount.query.filter_by(
+                user_id=current_user.id, name=name
+            ).first()
+            if existing:
+                existing.color         = color
+                existing.icon          = icon
+                existing.target_amount = target
+            else:
+                db.session.add(SavingsAccount(
+                    user_id=current_user.id, name=name,
+                    color=color, icon=icon, target_amount=target,
+                ))
+            sav_count += 1
+
+    # ── Импорт операций накоплений ────────────────────────────────
+    if 'Нак. Операции' in wb.sheetnames:
+        db.session.flush()
+        ws = wb['Нак. Операции']
+        rows = iter(ws.rows)
+        next(rows, None)
+        for row in rows:
+            vals = [cell.value for cell in row]
+            if len(vals) < 3:
+                skipped += 1
+                continue
+            date_str, acc_name_val, amount_val = vals[0], vals[1], vals[2]
+            desc = str(vals[3]).strip() if len(vals) > 3 and vals[3] else ''
+
+            try:
+                dep_date = date_str if isinstance(date_str, date) else \
+                    datetime.strptime(str(date_str).strip(), '%d.%m.%Y').date()
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            try:
+                amount = float(amount_val)
+                if amount <= 0:
+                    raise ValueError
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            acc_name_str = str(acc_name_val).strip() if acc_name_val else ''
+            if not acc_name_str:
+                skipped += 1
+                continue
+
+            acc = SavingsAccount.query.filter_by(
+                user_id=current_user.id, name=acc_name_str
+            ).first()
+            if not acc:
+                skipped += 1
+                continue
+
+            cat = get_savings_category()
+            db.session.add(Expense(
+                user_id=current_user.id,
+                category_id=cat.id,
+                savings_account_id=acc.id,
+                amount=amount,
+                description=desc or f'Пополнение: {acc.name}',
+                expense_date=dep_date,
+                is_planned=False,
+                is_spent=True,
+            ))
+            sav_ops_count += 1
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash('Ошибка при сохранении данных.', 'danger')
+        return redirect(url_for('profile'))
+
+    word_exp = 'расход' if exp_count == 1 else ('расхода' if exp_count < 5 else 'расходов')
+    word_inc = 'доход'  if inc_count == 1 else ('дохода'  if inc_count < 5 else 'доходов')
+    word_bud = 'запись бюджета' if bud_count == 1 else ('записи бюджета' if bud_count < 5 else 'записей бюджета')
+    parts = [f'{exp_count} {word_exp}', f'{inc_count} {word_inc}', f'{bud_count} {word_bud}']
+    if sav_count:
+        word_sav = 'счёт' if sav_count == 1 else ('счёта' if sav_count < 5 else 'счетов')
+        parts.append(f'{sav_count} {word_sav} накоплений')
+    if sav_ops_count:
+        word_ops = 'операция' if sav_ops_count == 1 else ('операции' if sav_ops_count < 5 else 'операций')
+        parts.append(f'{sav_ops_count} {word_ops} накоплений')
+    msg = 'Импортировано: ' + ', '.join(parts) + '.'
+    if skipped:
+        msg += f' Пропущено строк: {skipped}.'
+    flash(msg, 'success')
+    return redirect(url_for('profile'))
+
+
+@app.route('/profile/clear-data', methods=['POST'])
+@login_required
+@ban_check
+def profile_clear_data():
+    try:
+        Expense.query.filter_by(user_id=current_user.id).delete()
+        Income.query.filter_by(user_id=current_user.id).delete()
+        MonthlyBudget.query.filter_by(user_id=current_user.id).delete()
+        db.session.commit()
+        flash('Все данные очищены.', 'warning')
+    except Exception:
+        db.session.rollback()
+        flash('Ошибка при удалении данных.', 'danger')
+    return redirect(url_for('profile'))
+
+
+# ─── Администраторская панель ──────────────────────────────────────────────────
+
+@app.route('/admin')
+@login_required
+@admin_required
+def admin_panel():
+    users = User.query.order_by(User.created_at.desc()).all()
+    # Статистика по каждому пользователю
+    stats = {}
+    for u in users:
+        stats[u.id] = {
+            'expenses': Expense.query.filter_by(user_id=u.id).count(),
+            'incomes':  Income.query.filter_by(user_id=u.id).count(),
+        }
+    return render_template('admin/panel.html', users=users, stats=stats)
+
+
+@app.route('/admin/user/<int:user_id>/warn', methods=['POST'])
+@login_required
+@admin_required
+def admin_warn(user_id):
+    user = db.session.get(User, user_id)
+    if not user or user.is_admin:
+        abort(400)
+    note = request.form.get('note', '').strip()
+    user.warning_count += 1
+    user.warning_note   = note or None
+    user.status         = 'warned'
+    db.session.commit()
+    flash(f'Пользователю {user.username} выдано предупреждение ({user.warning_count}).', 'warning')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/ban', methods=['POST'])
+@login_required
+@admin_required
+def admin_ban(user_id):
+    user = db.session.get(User, user_id)
+    if not user or user.is_admin:
+        abort(400)
+    reason = request.form.get('reason', '').strip()
+    user.status     = 'banned'
+    user.ban_reason = reason or None
+    db.session.commit()
+    flash(f'Пользователь {user.username} заблокирован.', 'danger')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/unban', methods=['POST'])
+@login_required
+@admin_required
+def admin_unban(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        abort(404)
+    user.status         = 'active'
+    user.ban_reason     = None
+    user.warning_count  = 0
+    user.warning_note   = None
+    db.session.commit()
+    flash(f'Пользователь {user.username} разблокирован.', 'success')
+    return redirect(url_for('admin_panel'))
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def admin_delete_user(user_id):
+    user = db.session.get(User, user_id)
+    if not user or user.is_admin:
+        abort(400)
+    Expense.query.filter_by(user_id=user_id).delete()
+    Income.query.filter_by(user_id=user_id).delete()
+    MonthlyBudget.query.filter_by(user_id=user_id).delete()
+    db.session.delete(user)
+    db.session.commit()
+    flash(f'Пользователь удалён.', 'warning')
+    return redirect(url_for('admin_panel'))
+
+
+# ─── Основные маршруты ────────────────────────────────────────────────────────
+
+@app.route('/')
+@login_required
+@ban_check
+def index():
+    today = date.today()
+    year  = int(request.args.get('year',  today.year))
+    month = int(request.args.get('month', today.month))
+
+    uid          = current_user.id
+    summary      = get_monthly_summary(uid, year, month)
+    budget_map   = get_budget_map(uid, year, month)
+    total_spent  = sum(float(r.total) for r in summary)
+    total_income = get_monthly_income(uid, year, month)
+    balance      = total_income - total_spent
+
+    daily_info = get_daily_budget_info(
+        balance=balance,
+        salary_day=current_user.salary_day,
+        advance_day=current_user.advance_day,
+    )
+
+    recent = (
+        Expense.query
+        .filter(
+            Expense.user_id == uid,
+            extract('year',  Expense.expense_date) == year,
+            extract('month', Expense.expense_date) == month,
+        )
+        .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+        .limit(5).all()
+    )
+
+    prev_month = month - 1 if month > 1 else 12
+    prev_year  = year if month > 1 else year - 1
+
+    current_empty = (total_spent == 0 and total_income == 0)
+    prev_has_expenses = Expense.query.filter_by(
+        user_id=uid, is_planned=True
+    ).filter(
+        extract('year',  Expense.expense_date) == prev_year,
+        extract('month', Expense.expense_date) == prev_month,
+    ).count() > 0
+    prev_has_income = Income.query.filter(
+        Income.user_id == uid,
+        extract('year',  Income.income_date) == prev_year,
+        extract('month', Income.income_date) == prev_month,
+    ).count() > 0
+    can_copy = current_empty and (prev_has_expenses or prev_has_income)
+
+    savings_accounts = SavingsAccount.query.filter_by(
+        user_id=uid, is_active=True
+    ).order_by(SavingsAccount.created_at.asc()).all()
+    savings_data = []
+    for acc in savings_accounts:
+        bal = get_account_balance(acc.id)
+        pct = None
+        if acc.target_amount and float(acc.target_amount) > 0:
+            pct = min(round(bal / float(acc.target_amount) * 100, 1), 100.0)
+        savings_data.append({'acc': acc, 'balance': bal, 'pct': pct})
+
+    return render_template('index.html',
+        summary=summary, budget_map=budget_map,
+        total_spent=total_spent, total_income=total_income, balance=balance,
+        recent=recent, year=year, month=month, today=today, months=months_list(),
+        daily_info=daily_info,
+        salary_day=current_user.salary_day,
+        advance_day=current_user.advance_day,
+        can_copy=can_copy,
+        savings_data=savings_data,
+    )
+
+
+@app.route('/copy-from-previous', methods=['POST'])
+@login_required
+@ban_check
+def copy_from_previous():
+    year  = int(request.form['year'])
+    month = int(request.form['month'])
+    uid   = current_user.id
+
+    prev_month = month - 1 if month > 1 else 12
+    prev_year  = year if month > 1 else year - 1
+
+    src_expenses = Expense.query.filter_by(
+        user_id=uid, is_planned=True
+    ).filter(
+        extract('year',  Expense.expense_date) == prev_year,
+        extract('month', Expense.expense_date) == prev_month,
+    ).all()
+
+    src_incomes = Income.query.filter(
+        Income.user_id == uid,
+        extract('year',  Income.income_date) == prev_year,
+        extract('month', Income.income_date) == prev_month,
+    ).all()
+
+    month_names = {m: name for m, name in months_list()}
+
+    for exp in src_expenses:
+        new_day = adjust_day(exp.expense_date.day, year, month)
+        db.session.add(Expense(
+            user_id      = uid,
+            category_id  = exp.category_id,
+            amount       = exp.amount,
+            description  = exp.description,
+            notes        = exp.notes,
+            expense_date = date(year, month, new_day),
+            is_planned   = True,
+            is_spent     = False,
+        ))
+
+    for inc in src_incomes:
+        new_day = adjust_day(inc.income_date.day, year, month)
+        db.session.add(Income(
+            user_id     = uid,
+            source      = inc.source,
+            amount      = inc.amount,
+            description = inc.description,
+            notes       = inc.notes,
+            income_date = date(year, month, new_day),
+        ))
+
+    db.session.commit()
+    flash(
+        f'Скопировано {len(src_expenses)} расходов и {len(src_incomes)} доходов '
+        f'из {month_names[prev_month]}.',
+        'success'
+    )
+    return redirect(url_for('index', year=year, month=month))
+
+
+@app.route('/expenses')
+@login_required
+@ban_check
+def expenses_list():
+    today  = date.today()
+    year   = int(request.args.get('year',  today.year))
+    month  = int(request.args.get('month', today.month))
+    cat_id       = request.args.get('category_id', type=int)
+    spent_filter = request.args.get('spent', 'all')
+    uid          = current_user.id
+
+    query = Expense.query.filter(
+        Expense.user_id == uid,
+        extract('year',  Expense.expense_date) == year,
+        extract('month', Expense.expense_date) == month,
+    )
+    if cat_id:
+        query = query.filter(Expense.category_id == cat_id)
+    if spent_filter == 'spent':
+        query = query.filter(Expense.is_spent.is_(True))
+    elif spent_filter == 'unspent':
+        query = query.filter(Expense.is_spent.is_(False))
+
+    sort = request.args.get('sort', 'date_desc')
+    if sort == 'date_asc':
+        query = query.order_by(Expense.expense_date.asc(), Expense.created_at.asc())
+    elif sort == 'amount_desc':
+        query = query.order_by(Expense.amount.desc())
+    elif sort == 'amount_asc':
+        query = query.order_by(Expense.amount.asc())
+    elif sort == 'category_asc':
+        query = query.join(Category).order_by(Category.name.asc())
+    else:
+        sort = 'date_desc'
+        query = query.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+
+    expenses   = query.options(joinedload(Expense.attachments)).all()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
+
+    att_data = {
+        exp.id: [{'id': a.id, 'mime': a.mime_type, 'fname': a.filename} for a in exp.attachments]
+        for exp in expenses if exp.attachments
+    }
+
+    return render_template('expenses/list.html',
+        expenses=expenses, categories=categories, att_data=att_data,
+        year=year, month=month, months=months_list(), selected_cat=cat_id, sort=sort,
+        spent_filter=spent_filter)
+
+
+@app.route('/expenses/add', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def expense_add():
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
+    if request.method == 'POST':
+        try:
+            exp = Expense(
+                user_id      = current_user.id,
+                category_id  = int(request.form['category_id']),
+                amount       = float(request.form['amount']),
+                description  = request.form.get('description', '').strip() or None,
+                expense_date = datetime.strptime(request.form['expense_date'], '%Y-%m-%d').date(),
+                is_planned   = request.form.get('is_planned') == 'on',
+                is_spent     = request.form.get('is_spent') == 'on',
+                notes        = request.form.get('notes', '').strip() or None,
+            )
+            db.session.add(exp)
+            db.session.flush()
+            files = request.files.getlist('attachments')
+            for f in files:
+                if not f or not f.filename:
+                    continue
+                mime = f.mimetype or ''
+                if mime not in ALLOWED_MIME_TYPES:
+                    continue
+                data = f.read()
+                if len(data) > MAX_ATTACHMENT_SIZE:
+                    continue
+                db.session.add(ExpenseAttachment(
+                    expense_id=exp.id,
+                    filename=f.filename,
+                    mime_type=mime,
+                    data=data,
+                    size=len(data),
+                ))
+            db.session.commit()
+            flash('Расход добавлен!', 'success')
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    default_day = min(date.today().day, calendar.monthrange(ret_year, ret_month)[1])
+    default_date = date(ret_year, ret_month, default_day)
+    return render_template('expenses/form.html', categories=categories,
+                           expense=None, today=default_date,
+                           ret_year=ret_year, ret_month=ret_month)
+
+
+@app.route('/expenses/<int:exp_id>/edit', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def expense_edit(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first_or_404()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
+    if request.method == 'POST':
+        try:
+            exp.category_id  = int(request.form['category_id'])
+            exp.amount       = float(request.form['amount'])
+            exp.description  = request.form.get('description', '').strip() or None
+            exp.expense_date = datetime.strptime(request.form['expense_date'], '%Y-%m-%d').date()
+            exp.is_planned   = request.form.get('is_planned') == 'on'
+            exp.is_spent     = request.form.get('is_spent') == 'on'
+            exp.notes        = request.form.get('notes', '').strip() or None
+            db.session.commit()
+            flash('Расход обновлён!', 'success')
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    return render_template('expenses/form.html', categories=categories,
+                           expense=exp, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
+
+
+@app.route('/expenses/<int:exp_id>/delete', methods=['POST'])
+@login_required
+def expense_delete(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first_or_404()
+    db.session.delete(exp)
+    db.session.commit()
+    flash('Расход удалён.', 'warning')
+    ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+    ret_month = request.form.get('ret_month', type=int) or date.today().month
+    return redirect(url_for('expenses_list', year=ret_year, month=ret_month))
+
+
+@app.context_processor
+def inject_nav_month():
+    today = date.today()
+    nav_year  = request.args.get('year',  type=int) or today.year
+    nav_month = request.args.get('month', type=int) or today.month
+    return {'nav_year': nav_year, 'nav_month': nav_month}
+
+
+@app.context_processor
+def inject_reminders():
+    if not current_user.is_authenticated:
+        return {'reminders': []}
+    tomorrow = date.today() + timedelta(days=1)
+    reminders = Expense.query.filter_by(
+        user_id=current_user.id, is_spent=False
+    ).filter(Expense.expense_date == tomorrow).all()
+    return {'reminders': reminders}
+
+
+@app.route('/expenses/<int:exp_id>/toggle-spent', methods=['POST'])
+@login_required
+def expense_toggle_spent(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first()
+    if not exp:
+        abort(403)
+    exp.is_spent = not exp.is_spent
+    db.session.commit()
+    return jsonify({'is_spent': exp.is_spent})
+
+
+@app.route('/expenses/<int:exp_id>/copy', methods=['POST'])
+@login_required
+@ban_check
+def expense_copy(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    months = data.get('months') if data else None
+    if not months or not isinstance(months, list):
+        return jsonify({'error': 'Укажите месяцы'}), 400
+
+    today = date.today()
+    current_year = today.year
+    created = 0
+
+    for m in months:
+        if not isinstance(m, int) or not (1 <= m <= 12):
+            continue
+        max_day = calendar.monthrange(current_year, m)[1]
+        target_day = min(exp.expense_date.day, max_day)
+        target_date = date(current_year, m, target_day)
+        is_spent = False if target_date > today else exp.is_spent
+        copy = Expense(
+            user_id      = current_user.id,
+            category_id  = exp.category_id,
+            amount       = exp.amount,
+            description  = exp.description,
+            expense_date = target_date,
+            is_planned   = exp.is_planned,
+            is_spent     = is_spent,
+            notes        = exp.notes,
+        )
+        db.session.add(copy)
+        created += 1
+
+    try:
+        db.session.commit()
+        return jsonify({'created': created})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+@app.route('/categories/add', methods=['POST'])
+@login_required
+@ban_check
+def category_add():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    name  = (data.get('name') or '').strip()
+    color = data.get('color', '#6c757d')
+    if color and not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
+
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+
+    # Проверка: нет ли уже такой категории (системной или своей)
+    existing = Category.query.filter(
+        db.func.lower(Category.name) == name.lower(),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).first()
+    if existing:
+        return jsonify({'error': f'Категория «{existing.name}» уже существует'}), 409
+
+    cat = Category(name=name, color=color, user_id=current_user.id)
+    try:
+        db.session.add(cat)
+        db.session.commit()
+        return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/categories/<int:cat_id>', methods=['DELETE'])
+@login_required
+def category_delete(cat_id):
+    cat = Category.query.filter_by(id=cat_id, user_id=current_user.id).first_or_404()
+    in_use = Expense.query.filter_by(category_id=cat_id).count()
+    if in_use:
+        return jsonify({'error': f'Категория используется в {in_use} расход(ах)'}), 409
+    try:
+        db.session.delete(cat)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/categories/<int:cat_id>', methods=['PATCH'])
+@login_required
+@ban_check
+def category_edit(cat_id):
+    cat = Category.query.filter_by(id=cat_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+
+    name  = (data.get('name') or '').strip()
+    color = (data.get('color') or '').strip()
+
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
+
+    conflict = Category.query.filter(
+        db.func.lower(Category.name) == name.lower(),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id),
+        Category.id != cat_id,
+    ).first()
+    if conflict:
+        return jsonify({'error': f'Категория «{conflict.name}» уже существует'}), 409
+
+    cat.name  = name
+    cat.color = color
+    try:
+        db.session.commit()
+        return jsonify({'id': cat.id, 'name': cat.name, 'color': cat.color})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+# ─── Attachments ──────────────────────────────────────────────────────────────
+
+ALLOWED_MIME_TYPES  = {'image/jpeg', 'image/png', 'image/webp', 'application/pdf'}
+MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_ATTACHMENTS     = 10
+
+
+@app.route('/attachments/<int:att_id>')
+@login_required
+def attachment_serve(att_id):
+    att = ExpenseAttachment.query.get_or_404(att_id)
+    if att.expense.user_id != current_user.id:
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    return send_file(
+        io.BytesIO(att.data),
+        mimetype=att.mime_type,
+        download_name=att.filename,
+        as_attachment=False,
+        max_age=3600,
+    )
+
+
+@app.route('/expenses/<int:exp_id>/attachments', methods=['POST'])
+@login_required
+@ban_check
+def attachment_upload(exp_id):
+    exp = Expense.query.filter_by(id=exp_id, user_id=current_user.id).first()
+    if exp is None:
+        return jsonify({'error': 'Расход не найден'}), 403
+
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'Файл не передан'}), 400
+
+    mime = f.mimetype or ''
+    if mime not in ALLOWED_MIME_TYPES:
+        return jsonify({'error': 'Недопустимый тип файла'}), 415
+
+    data = f.read()
+    if len(data) > MAX_ATTACHMENT_SIZE:
+        return jsonify({'error': 'Файл слишком большой (макс. 10 МБ)'}), 413
+
+    if ExpenseAttachment.query.filter_by(expense_id=exp_id).count() >= MAX_ATTACHMENTS:
+        return jsonify({'error': 'Максимум 10 вложений на расход'}), 409
+
+    att = ExpenseAttachment(
+        expense_id=exp_id,
+        filename=f.filename or 'file',
+        mime_type=mime,
+        data=data,
+        size=len(data),
+    )
+    try:
+        db.session.add(att)
+        db.session.commit()
+        return jsonify({'id': att.id, 'filename': att.filename,
+                        'mime_type': att.mime_type, 'size': att.size}), 201
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+@app.route('/attachments/<int:att_id>', methods=['DELETE'])
+@login_required
+def attachment_delete(att_id):
+    att = ExpenseAttachment.query.get_or_404(att_id)
+    if att.expense.user_id != current_user.id:
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    try:
+        db.session.delete(att)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка удаления'}), 500
+
+
+@app.route('/budget', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def budget():
+    today      = date.today()
+    year       = int(request.args.get('year',  today.year))
+    month      = int(request.args.get('month', today.month))
+    uid        = current_user.id
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == current_user.id)
+    ).order_by(Category.name).all()
+    budget_map = get_budget_map(uid, year, month)
+
+    if request.method == 'POST':
+        year  = int(request.form['year'])
+        month = int(request.form['month'])
+        for cat in categories:
+            val = request.form.get(f'budget_{cat.id}', '').strip()
+            existing = MonthlyBudget.query.filter_by(
+                user_id=uid, category_id=cat.id, year=year, month=month
+            ).first()
+            if val:
+                amount = float(val)
+                if existing:
+                    existing.amount = amount
+                else:
+                    db.session.add(MonthlyBudget(
+                        user_id=uid, category_id=cat.id,
+                        year=year, month=month, amount=amount
+                    ))
+            elif existing:
+                db.session.delete(existing)
+        db.session.commit()
+        flash('Бюджет сохранён!', 'success')
+        return redirect(url_for('budget', year=year, month=month))
+
+    return render_template('budget.html', categories=categories,
+                           budget_map=budget_map, year=year, month=month,
+                           months=months_list())
+
+
+# ─── Доходы ───────────────────────────────────────────────────────────────────
+
+@app.route('/income')
+@login_required
+@ban_check
+def income_list():
+    today = date.today()
+    year  = int(request.args.get('year',  today.year))
+    month = int(request.args.get('month', today.month))
+    uid   = current_user.id
+
+    incomes = (
+        Income.query
+        .filter(
+            Income.user_id == uid,
+            extract('year',  Income.income_date) == year,
+            extract('month', Income.income_date) == month,
+            Income.savings_account_id.is_(None),
+        )
+        .order_by(Income.income_date.desc(), Income.created_at.desc()).all()
+    )
+    total = sum(float(i.amount) for i in incomes)
+    return render_template('income/list.html',
+                           incomes=incomes, total=total,
+                           year=year, month=month, months=months_list())
+
+
+@app.route('/income/add', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def income_add():
+    if request.method == 'POST':
+        try:
+            inc = Income(
+                user_id     = current_user.id,
+                amount      = float(request.form['amount']),
+                source      = request.form['source'].strip(),
+                description = request.form.get('description', '').strip() or None,
+                income_date = datetime.strptime(request.form['income_date'], '%Y-%m-%d').date(),
+                notes       = request.form.get('notes', '').strip() or None,
+            )
+            db.session.add(inc)
+            db.session.commit()
+            flash('Доход добавлен!', 'success')
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('income_list', year=ret_year, month=ret_month))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    default_day = min(date.today().day, calendar.monthrange(ret_year, ret_month)[1])
+    default_date = date(ret_year, ret_month, default_day)
+    return render_template('income/form.html', income=None, today=default_date,
+                           ret_year=ret_year, ret_month=ret_month)
+
+
+@app.route('/income/<int:inc_id>/edit', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def income_edit(inc_id):
+    inc = Income.query.filter_by(id=inc_id, user_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        try:
+            inc.amount      = float(request.form['amount'])
+            inc.source      = request.form['source'].strip()
+            inc.description = request.form.get('description', '').strip() or None
+            inc.income_date = datetime.strptime(request.form['income_date'], '%Y-%m-%d').date()
+            inc.notes       = request.form.get('notes', '').strip() or None
+            db.session.commit()
+            flash('Доход обновлён!', 'success')
+            ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+            ret_month = request.form.get('ret_month', type=int) or date.today().month
+            return redirect(url_for('income_list', year=ret_year, month=ret_month))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка: {e}', 'danger')
+    ret_year  = request.args.get('ret_year',  type=int) or date.today().year
+    ret_month = request.args.get('ret_month', type=int) or date.today().month
+    return render_template('income/form.html', income=inc, today=date.today(),
+                           ret_year=ret_year, ret_month=ret_month)
+
+
+@app.route('/income/<int:inc_id>/delete', methods=['POST'])
+@login_required
+def income_delete(inc_id):
+    inc = Income.query.filter_by(id=inc_id, user_id=current_user.id).first_or_404()
+    db.session.delete(inc)
+    db.session.commit()
+    flash('Доход удалён.', 'warning')
+    ret_year  = request.form.get('ret_year',  type=int) or date.today().year
+    ret_month = request.form.get('ret_month', type=int) or date.today().month
+    return redirect(url_for('income_list', year=ret_year, month=ret_month))
+
+
+# ─── Накопительные счета ──────────────────────────────────────────────────────
+
+SAVINGS_ICONS = [
+    ('bi-piggy-bank',       'Копилка'),
+    ('bi-airplane',         'Путешествие'),
+    ('bi-car-front',        'Авто'),
+    ('bi-house',            'Жильё'),
+    ('bi-laptop',           'Техника'),
+    ('bi-phone',            'Телефон'),
+    ('bi-heart-pulse',      'Здоровье'),
+    ('bi-book',             'Образование'),
+    ('bi-shield',           'Подушка'),
+    ('bi-gift',             'Подарок'),
+    ('bi-music-note-beamed','Хобби'),
+    ('bi-bicycle',          'Спорт'),
+    ('bi-bag',              'Шопинг'),
+    ('bi-bank2',            'Вклад'),
+    ('bi-cash-coin',        'Деньги'),
+    ('bi-heart',            'Любовь'),
+    ('bi-stars',            'Мечта'),
+    ('bi-tools',            'Ремонт'),
+    ('bi-camera',           'Фото'),
+    ('bi-fire',             'Срочное'),
+]
+
+MAX_SAVINGS_IMAGE = 2 * 1024 * 1024  # 2 MB
+
+
+def _parse_savings_form(form, files, acc=None):
+    """Parse create/edit form, return dict of fields or None on error (sets flash)."""
+    name = form.get('name', '').strip()
+    if not name:
+        flash('Название обязательно.', 'danger')
+        return None
+    if len(name) > 100:
+        flash('Название слишком длинное.', 'danger')
+        return None
+    color = form.get('color', '#0d6efd').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        color = '#0d6efd'
+    icon = form.get('icon', 'bi-piggy-bank').strip() or 'bi-piggy-bank'
+    raw_target = form.get('target_amount', '').strip()
+    target = None
+    if raw_target:
+        try:
+            target = float(raw_target)
+            if target <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            flash('Неверная целевая сумма.', 'danger')
+            return None
+    image_data = image_mime = None
+    if form.get('clear_image') == '1':
+        image_data, image_mime = None, None
+    else:
+        f = files.get('image')
+        if f and f.filename:
+            mime = f.mimetype or ''
+            if not mime.startswith('image/'):
+                flash('Допускаются только изображения.', 'danger')
+                return None
+            data = f.read()
+            if len(data) > MAX_SAVINGS_IMAGE:
+                flash('Изображение слишком большое (макс. 2 МБ).', 'danger')
+                return None
+            image_data, image_mime = data, mime
+        elif acc:
+            image_data = acc.image_data
+            image_mime = acc.image_mime
+    return {'name': name, 'color': color, 'icon': icon, 'target': target,
+            'image_data': image_data, 'image_mime': image_mime}
+
+
+@app.route('/savings')
+@login_required
+@ban_check
+def savings_list():
+    uid = current_user.id
+    accounts = SavingsAccount.query.filter_by(
+        user_id=uid, is_active=True
+    ).order_by(SavingsAccount.created_at.asc()).all()
+
+    account_data = []
+    for acc in accounts:
+        balance  = get_account_balance(acc.id)
+        tx_count = (Expense.query.filter_by(savings_account_id=acc.id).count() +
+                    Income.query.filter_by(savings_account_id=acc.id).count())
+        pct = None
+        if acc.target_amount and float(acc.target_amount) > 0:
+            pct = min(round(balance / float(acc.target_amount) * 100, 1), 100.0)
+        recent_ops = []
+        for d in (Expense.query.filter_by(savings_account_id=acc.id)
+                  .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+                  .limit(5).all()):
+            recent_ops.append({
+                'type': 'deposit',
+                'amount': float(d.amount),
+                'description': d.description or 'Пополнение',
+                'date': d.expense_date.strftime('%d.%m.%Y'),
+            })
+        for w in (Income.query.filter_by(savings_account_id=acc.id)
+                  .order_by(Income.income_date.desc(), Income.created_at.desc())
+                  .limit(5).all()):
+            recent_ops.append({
+                'type': 'withdrawal',
+                'amount': float(w.amount),
+                'description': w.description or 'Снятие',
+                'date': w.income_date.strftime('%d.%m.%Y'),
+            })
+        recent_ops.sort(key=lambda x: x['date'], reverse=True)
+        account_data.append({
+            'acc': acc, 'balance': balance, 'tx_count': tx_count,
+            'pct': pct, 'recent_ops': recent_ops[:5],
+        })
+
+    deposits = (Expense.query
+                .filter(Expense.user_id == uid, Expense.savings_account_id.isnot(None))
+                .options(joinedload(Expense.savings_account)).all())
+    withdrawals = (Income.query
+                   .filter(Income.user_id == uid, Income.savings_account_id.isnot(None))
+                   .options(joinedload(Income.savings_account)).all())
+
+    history = []
+    for d in deposits:
+        history.append({
+            'type': 'deposit', 'amount': float(d.amount),
+            'description': d.description, 'date': d.expense_date,
+            'account_name':  d.savings_account.name  if d.savings_account else '—',
+            'account_color': d.savings_account.color if d.savings_account else '#6c757d',
+        })
+    for w in withdrawals:
+        history.append({
+            'type': 'withdrawal', 'amount': float(w.amount),
+            'description': w.description, 'date': w.income_date,
+            'account_name':  w.savings_account.name  if w.savings_account else '—',
+            'account_color': w.savings_account.color if w.savings_account else '#6c757d',
+        })
+    history.sort(key=lambda x: x['date'], reverse=True)
+
+    open_acc_id = request.args.get('acc', type=int)
+
+    return render_template('savings/list.html',
+                           account_data=account_data,
+                           history=history[:50],
+                           today=date.today(),
+                           open_acc_id=open_acc_id)
+
+
+@app.route('/savings/add', methods=['POST'])
+@login_required
+@ban_check
+def savings_add():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Название обязательно'}), 400
+    if len(name) > 100:
+        return jsonify({'error': 'Название слишком длинное'}), 400
+    color = (data.get('color') or '#0d6efd').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        return jsonify({'error': 'Неверный формат цвета'}), 400
+    icon = (data.get('icon') or 'bi-piggy-bank').strip()
+    target = None
+    raw_target = data.get('target_amount')
+    if raw_target not in (None, ''):
+        try:
+            target = float(raw_target)
+            if target <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Неверная целевая сумма'}), 400
+    acc = SavingsAccount(user_id=current_user.id, name=name, color=color,
+                         icon=icon, target_amount=target)
+    try:
+        db.session.add(acc)
+        db.session.commit()
+        return jsonify({'id': acc.id, 'name': acc.name}), 201
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/savings/new', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def savings_new():
+    if request.method == 'POST':
+        fields = _parse_savings_form(request.form, request.files)
+        if fields is None:
+            return render_template('savings/form.html', acc=None,
+                                   savings_icons=SAVINGS_ICONS)
+        acc = SavingsAccount(
+            user_id=current_user.id,
+            name=fields['name'], color=fields['color'], icon=fields['icon'],
+            target_amount=fields['target'],
+            image_data=fields['image_data'], image_mime=fields['image_mime'],
+        )
+        db.session.add(acc)
+        db.session.commit()
+        flash('Счёт создан!', 'success')
+        return redirect(url_for('savings_list'))
+    return render_template('savings/form.html', acc=None, savings_icons=SAVINGS_ICONS)
+
+
+@app.route('/savings/<int:acc_id>/edit', methods=['GET', 'POST'])
+@login_required
+@ban_check
+def savings_edit(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    if request.method == 'POST':
+        fields = _parse_savings_form(request.form, request.files, acc=acc)
+        if fields is None:
+            return render_template('savings/form.html', acc=acc,
+                                   savings_icons=SAVINGS_ICONS)
+        acc.name          = fields['name']
+        acc.color         = fields['color']
+        acc.icon          = fields['icon']
+        acc.target_amount = fields['target']
+        acc.image_data    = fields['image_data']
+        acc.image_mime    = fields['image_mime']
+        db.session.commit()
+        flash('Счёт обновлён!', 'success')
+        return redirect(url_for('savings_list'))
+    return render_template('savings/form.html', acc=acc, savings_icons=SAVINGS_ICONS)
+
+
+@app.route('/savings/<int:acc_id>/image')
+@login_required
+def savings_image(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    if not acc.image_data:
+        abort(404)
+    return send_file(
+        io.BytesIO(acc.image_data),
+        mimetype=acc.image_mime,
+        max_age=3600,
+    )
+
+
+@app.route('/savings/<int:acc_id>', methods=['DELETE'])
+@login_required
+def savings_delete(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    try:
+        Expense.query.filter_by(savings_account_id=acc_id).delete()
+        Income.query.filter_by(savings_account_id=acc_id).delete()
+        db.session.delete(acc)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сервера'}), 500
+
+
+@app.route('/savings/<int:acc_id>/deposit', methods=['POST'])
+@login_required
+@ban_check
+def savings_deposit(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    try:
+        amount = float(data['amount'])
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная сумма'}), 400
+    try:
+        txn_date = datetime.strptime(data['date'], '%Y-%m-%d').date()
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная дата'}), 400
+    description = (data.get('description') or '').strip() or f'Пополнение: {acc.name}'
+    cat = get_savings_category()
+    exp = Expense(
+        user_id=current_user.id,
+        category_id=cat.id,
+        savings_account_id=acc_id,
+        amount=amount,
+        description=description,
+        expense_date=txn_date,
+        is_planned=False,
+        is_spent=True,
+    )
+    db.session.add(exp)
+    try:
+        db.session.commit()
+        return jsonify({'ok': True, 'balance': get_account_balance(acc_id)})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+@app.route('/savings/<int:acc_id>/withdraw', methods=['POST'])
+@login_required
+@ban_check
+def savings_withdraw(acc_id):
+    acc = SavingsAccount.query.filter_by(id=acc_id, user_id=current_user.id).first_or_404()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    try:
+        amount = float(data['amount'])
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная сумма'}), 400
+    try:
+        datetime.strptime(data['date'], '%Y-%m-%d').date()
+    except (ValueError, KeyError, TypeError):
+        return jsonify({'error': 'Неверная дата'}), 400
+    balance = get_account_balance(acc_id)
+    if amount > balance:
+        return jsonify({'error': f'Недостаточно средств. Баланс: {balance:.2f} ₽'}), 400
+    # Reduce deposit expenses FIFO (oldest first)
+    deposits = Expense.query.filter_by(
+        savings_account_id=acc_id
+    ).order_by(Expense.expense_date.asc(), Expense.created_at.asc()).all()
+    remaining = amount
+    for dep in deposits:
+        if remaining <= 0:
+            break
+        dep_amount = float(dep.amount)
+        if dep_amount <= remaining:
+            remaining -= dep_amount
+            db.session.delete(dep)
+        else:
+            dep.amount = round(dep_amount - remaining, 2)
+            remaining = 0
+    try:
+        db.session.commit()
+        return jsonify({'ok': True, 'balance': get_account_balance(acc_id)})
+    except Exception:
+        db.session.rollback()
+        return jsonify({'error': 'Ошибка сохранения'}), 500
+
+
+# ─── API ──────────────────────────────────────────────────────────────────────
+
+@app.route('/api/chart-data')
+@login_required
+def chart_data():
+    today = date.today()
+    year  = int(request.args.get('year',  today.year))
+    month = int(request.args.get('month', today.month))
+    rows  = get_monthly_summary(current_user.id, year, month)
+    return jsonify({
+        'labels': [r.name for r in rows if float(r.total) > 0],
+        'data':   [float(r.total) for r in rows if float(r.total) > 0],
+        'colors': [r.color for r in rows if float(r.total) > 0],
+    })
+
+
+def _prev_period(year: int, month: int, mode: str):
+    """Возвращает (year, month) периода для сравнения."""
+    if mode == 'prev_year':
+        return year - 1, month
+    if month == 1:
+        return year - 1, 12
+    return year, month - 1
+
+
+def _month_label(year: int, month: int) -> str:
+    MONTHS_RU = [
+        '', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+        'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+    ]
+    return f'{MONTHS_RU[month]} {year}'
+
+
+@app.route('/api/stats-data')
+@login_required
+def stats_data():
+    today = date.today()
+    year  = int(request.args.get('year',  today.year))
+    month = int(request.args.get('month', today.month))
+    mode  = request.args.get('mode', 'prev_month')  # 'prev_month' | 'prev_year'
+    uid   = current_user.id
+
+    # ── Блок сравнения ────────────────────────────────────────────────
+    py, pm = _prev_period(year, month, mode)
+
+    def cat_totals(y, m):
+        rows = (
+            db.session.query(
+                Category.id,
+                Category.name,
+                Category.color,
+                Category.icon,
+                func.coalesce(func.sum(Expense.amount), 0).label('total'),
+            )
+            .outerjoin(
+                Expense,
+                (Expense.category_id == Category.id)
+                & (Expense.user_id == uid)
+                & (extract('year',  Expense.expense_date) == y)
+                & (extract('month', Expense.expense_date) == m),
+            )
+            .filter(
+                Category.is_active.is_(True),
+                db.or_(Category.user_id.is_(None), Category.user_id == uid)
+            )
+            .group_by(Category.id, Category.name, Category.color, Category.icon)
+            .all()
+        )
+        return {r.id: {'name': r.name, 'color': r.color, 'icon': r.icon, 'total': float(r.total)} for r in rows}
+
+    cur_map  = cat_totals(year, month)
+    prev_map = cat_totals(py, pm)
+
+    categories = []
+    for cat_id, cur in cur_map.items():
+        prev_total = prev_map.get(cat_id, {}).get('total', None)
+        if cur['total'] == 0 and (prev_total is None or prev_total == 0):
+            continue
+        if prev_total is None or prev_total == 0:
+            delta_pct = None  # новая категория
+        else:
+            delta_pct = round((cur['total'] - prev_total) / prev_total * 100, 1)
+        categories.append({
+            'id':        cat_id,
+            'name':      cur['name'],
+            'color':     cur['color'],
+            'icon':      cur['icon'],
+            'current':   cur['total'],
+            'previous':  prev_total or 0,
+            'delta_pct': delta_pct,
+        })
+
+    categories.sort(key=lambda x: x['current'], reverse=True)
+
+    total_cur  = sum(c['current']  for c in categories)
+    total_prev = sum(c['previous'] for c in categories)
+    total_delta = round((total_cur - total_prev) / total_prev * 100, 1) if total_prev else None
+
+    # ── Динамика за 3 месяца ─────────────────────────────────────────
+    months_data = []
+    cy, cm = year, month
+    for _ in range(3):
+        inc = float(db.session.query(
+            func.coalesce(func.sum(Income.amount), 0)
+        ).filter(
+            Income.user_id == uid,
+            extract('year',  Income.income_date) == cy,
+            extract('month', Income.income_date) == cm,
+            Income.savings_account_id.is_(None),
+        ).scalar())
+        exp = float(db.session.query(
+            func.coalesce(func.sum(Expense.amount), 0)
+        ).filter(
+            Expense.user_id == uid,
+            extract('year',  Expense.expense_date) == cy,
+            extract('month', Expense.expense_date) == cm,
+        ).scalar())
+        months_data.append({
+            'year': cy, 'month': cm,
+            'label': _month_label(cy, cm),
+            'income': inc, 'expenses': exp,
+            'balance': round(inc - exp, 2),
+            'is_current': (cy == year and cm == month),
+        })
+        cy, cm = _prev_period(cy, cm, 'prev_month')
+
+    months_data.reverse()  # хронологический порядок: старый → новый
+
+    # % изменения относительно предыдущего месяца
+    for i in range(1, len(months_data)):
+        prev = months_data[i - 1]
+        cur  = months_data[i]
+        cur['income_delta']  = round((cur['income']   - prev['income'])   / prev['income']   * 100, 1) if prev['income']   else None
+        cur['expense_delta'] = round((cur['expenses'] - prev['expenses']) / prev['expenses'] * 100, 1) if prev['expenses'] else None
+
+    best_income   = max(months_data, key=lambda x: x['income'])
+    worst_expense = max(months_data, key=lambda x: x['expenses'])
+    best_balance  = max(months_data, key=lambda x: x['balance'])
+
+    return jsonify({
+        'comparison': {
+            'mode':           mode,
+            'current_label':  _month_label(year, month),
+            'compare_label':  _month_label(py, pm),
+            'categories':     categories,
+            'total_current':  round(total_cur,  2),
+            'total_previous': round(total_prev, 2),
+            'total_delta':    total_delta,
+        },
+        'monthly': {
+            'months':              months_data,
+            'best_income_month':   {'label': best_income['label'],   'amount': best_income['income']},
+            'worst_expense_month': {'label': worst_expense['label'], 'amount': worst_expense['expenses']},
+            'best_balance_month':  {'label': best_balance['label'],  'amount': best_balance['balance']},
+        },
+    })
+
+
+@app.route('/api/payment-days', methods=['POST'])
+@login_required
+def api_payment_days():
+    def parse_day(val):
+        if val is None or val == '':
+            return None
+        try:
+            d = int(val)
+        except (ValueError, TypeError):
+            return -1
+        return d if 1 <= d <= 31 else -1
+
+    salary_day  = parse_day(request.form.get('salary_day'))
+    advance_day = parse_day(request.form.get('advance_day'))
+
+    if salary_day == -1 or advance_day == -1:
+        return jsonify({'error': 'Значение должно быть от 1 до 31'}), 400
+
+    current_user.salary_day  = salary_day
+    current_user.advance_day = advance_day
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ─── ИИ-помощник (Groq) ───────────────────────────────────────────────────────
+_groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'), timeout=60.0) if os.getenv('GROQ_API_KEY') else None
+
+
+def _build_chat_context(user_id: int) -> dict:
+    today = date.today()
+    categories = Category.query.filter(
+        Category.is_active.is_(True),
+        db.or_(Category.user_id.is_(None), Category.user_id == user_id)
+    ).order_by(Category.name).all()
+
+    monthly_income = get_monthly_income(user_id, today.year, today.month)
+    monthly_expenses = float(db.session.query(
+        func.coalesce(func.sum(Expense.amount), 0)
+    ).filter(
+        Expense.user_id == user_id,
+        extract('year',  Expense.expense_date) == today.year,
+        extract('month', Expense.expense_date) == today.month,
+        Expense.is_spent.is_(True),
+        Expense.savings_account_id.is_(None),
+    ).scalar())
+
+    recent_expenses = (Expense.query
+        .filter_by(user_id=user_id)
+        .order_by(Expense.expense_date.desc(), Expense.id.desc())
+        .limit(8).all())
+
+    recent_income = (Income.query
+        .filter_by(user_id=user_id)
+        .order_by(Income.income_date.desc(), Income.id.desc())
+        .limit(5).all())
+
+    return {
+        'today': today.isoformat(),
+        'categories': categories,
+        'monthly_income': monthly_income,
+        'monthly_expenses': monthly_expenses,
+        'remaining': monthly_income - monthly_expenses,
+        'recent_expenses': recent_expenses,
+        'recent_income': recent_income,
+    }
+
+
+def _build_system_prompt(ctx: dict) -> str:
+    cat_names = ', '.join(c.name for c in ctx['categories'])
+
+    exp_lines = '\n'.join(
+        f"ID:{e.id} {float(e.amount):.0f}₽ {e.category.name} {e.expense_date}"
+        for e in ctx['recent_expenses']
+    ) or '-'
+
+    inc_lines = '\n'.join(
+        f"ID:{i.id} {float(i.amount):.0f}₽ {i.source} {i.income_date}"
+        for i in ctx['recent_income']
+    ) or '-'
+
+    return f"""Финансовый ассистент. Отвечай ТОЛЬКО на русском. Отвечай ТОЛЬКО валидным JSON:
+{{"message":"текст","action":"действие","params":{{}}}}
+
+Действия: add_expense(amount,category_name,description?,date?), add_income(amount,source,description?,date?), edit_expense(expense_id,amount?,category_name?,description?), delete_expense(expense_id), edit_income(income_id,amount?,source?), delete_income(income_id), none(для показа данных и вопросов).
+
+Сегодня: {ctx['today']}
+Категории: {cat_names}
+Месяц: доход {ctx['monthly_income']:.0f}₽, расход {ctx['monthly_expenses']:.0f}₽, остаток {ctx['remaining']:.0f}₽
+
+Расходы:
+{exp_lines}
+
+Доходы:
+{inc_lines}
+
+Правила: подбирай ближайшую категорию из списка; для чтения данных используй action=none; дату не указывай если не сказано — используй сегодня."""
+
+
+def _find_category_by_name(name: str, categories: list) -> 'Category | None':
+    name_l = name.lower().strip()
+    for c in categories:
+        if c.name.lower() == name_l:
+            return c
+    for c in categories:
+        if name_l in c.name.lower() or c.name.lower() in name_l:
+            return c
+    return None
+
+
+def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 'str | None':
+    today = date.today()
+
+    if action == 'add_expense':
+        cat = _find_category_by_name(params.get('category_name', ''), ctx['categories'])
+        if not cat:
+            cat_names = ', '.join(c.name for c in ctx['categories'])
+            return f"Категория «{params.get('category_name')}» не найдена. Доступные: {cat_names}"
+        exp_date = today
+        if params.get('date'):
+            try:
+                exp_date = date.fromisoformat(params['date'])
+            except ValueError:
+                pass
+        exp = Expense(
+            user_id=user_id,
+            category_id=cat.id,
+            amount=float(params['amount']),
+            description=params.get('description') or None,
+            expense_date=exp_date,
+            is_planned=False,
+            is_spent=True,
+        )
+        db.session.add(exp)
+        db.session.commit()
+        return None
+
+    if action == 'add_income':
+        inc_date = today
+        if params.get('date'):
+            try:
+                inc_date = date.fromisoformat(params['date'])
+            except ValueError:
+                pass
+        inc = Income(
+            user_id=user_id,
+            amount=float(params['amount']),
+            source=params.get('source', 'Прочее').strip(),
+            description=params.get('description') or None,
+            income_date=inc_date,
+        )
+        db.session.add(inc)
+        db.session.commit()
+        return None
+
+    if action == 'edit_expense':
+        exp = Expense.query.filter_by(id=params.get('expense_id'), user_id=user_id).first()
+        if not exp:
+            return 'Расход не найден.'
+        if params.get('amount'):
+            exp.amount = float(params['amount'])
+        if params.get('category_name'):
+            cat = _find_category_by_name(params['category_name'], ctx['categories'])
+            if cat:
+                exp.category_id = cat.id
+        if params.get('description'):
+            exp.description = params['description']
+        db.session.commit()
+        return None
+
+    if action == 'delete_expense':
+        exp = Expense.query.filter_by(id=params.get('expense_id'), user_id=user_id).first()
+        if not exp:
+            return 'Расход не найден.'
+        db.session.delete(exp)
+        db.session.commit()
+        return None
+
+    if action == 'edit_income':
+        inc = Income.query.filter_by(id=params.get('income_id'), user_id=user_id).first()
+        if not inc:
+            return 'Доход не найден.'
+        if params.get('amount'):
+            inc.amount = float(params['amount'])
+        if params.get('source'):
+            inc.source = params['source'].strip()
+        if params.get('description'):
+            inc.description = params['description']
+        db.session.commit()
+        return None
+
+    if action == 'delete_income':
+        inc = Income.query.filter_by(id=params.get('income_id'), user_id=user_id).first()
+        if not inc:
+            return 'Доход не найден.'
+        db.session.delete(inc)
+        db.session.commit()
+        return None
+
+    return None
+
+
+@app.route('/api/chat', methods=['POST'])
+@login_required
+@ban_check
+def api_chat():
+    if not _groq_client:
+        return jsonify({'message': 'ИИ-помощник не настроен (отсутствует GROQ_API_KEY).', 'ok': False}), 503
+
+    try:
+        data = request.get_json(silent=True) or {}
+        user_message = (data.get('message') or '').strip()
+        history = data.get('history') or []
+
+        if not user_message:
+            return jsonify({'message': 'Пустое сообщение.', 'ok': False}), 400
+
+        ctx = _build_chat_context(current_user.id)
+        system_prompt = _build_system_prompt(ctx)
+
+        messages = [{'role': 'system', 'content': system_prompt}]
+        for h in history[-10:]:
+            if h.get('role') in ('user', 'assistant') and h.get('content'):
+                messages.append({'role': h['role'], 'content': str(h['content'])})
+        messages.append({'role': 'user', 'content': user_message})
+
+        response = _groq_client.chat.completions.create(
+            model='llama-3.1-8b-instant',
+            messages=messages,
+            response_format={'type': 'json_object'},
+            temperature=0.1,
+            max_tokens=256,
+        )
+        raw = response.choices[0].message.content
+        parsed = json.loads(raw)
+    except Exception as e:
+        app.logger.error('Groq chat error: %s', e, exc_info=True)
+        return jsonify({'message': f'Ошибка: {e}', 'ok': False}), 503
+
+    action  = parsed.get('action', 'none')
+    params  = parsed.get('params') or {}
+    message = parsed.get('message', '')
+
+    WRITE_ACTIONS = {'add_expense', 'add_income', 'edit_expense', 'delete_expense',
+                     'edit_income', 'delete_income'}
+
+    error = _execute_chat_action(action, params, current_user.id, ctx)
+    if error:
+        return jsonify({'message': error, 'ok': False})
+
+    return jsonify({'message': message, 'ok': True, 'reload': action in WRITE_ACTIONS})
+
+
+with app.app_context():
+    db.create_all()
+    # Добавляем новые колонки если их ещё нет (safe migration)
+    from sqlalchemy import inspect, text
+    inspector = inspect(db.engine)
+    columns = [c['name'] for c in inspector.get_columns('users')]
+    if 'avatar' not in columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN avatar VARCHAR(10) NULL;"))
+            conn.commit()
+    if 'salary_day' not in columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN salary_day INTEGER NULL;"))
+            conn.commit()
+    if 'advance_day' not in columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN advance_day INTEGER NULL;"))
+            conn.commit()
+    # Миграция categories: добавить user_id
+    cat_columns = [c['name'] for c in inspector.get_columns('categories')]
+    if 'user_id' not in cat_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE categories ADD COLUMN user_id INTEGER NULL REFERENCES users(id);"))
+            conn.commit()
+    # Снять старый unique constraint на name
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_name_key;"))
+            conn.commit()
+    except Exception as e:
+        app.logger.warning("Could not drop categories_name_key constraint: %s", e)
+    exp_columns = [c['name'] for c in inspector.get_columns('expenses')]
+    if 'is_spent' not in exp_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE expenses ADD COLUMN is_spent BOOLEAN NOT NULL DEFAULT TRUE;"))
+            conn.commit()
+    # ── savings_accounts migration ────────────────────────────────
+    if 'savings_account_id' not in exp_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE expenses ADD COLUMN savings_account_id INTEGER NULL "
+                "REFERENCES savings_accounts(id);"
+            ))
+            conn.commit()
+    inc_columns = [c['name'] for c in inspector.get_columns('incomes')]
+    if 'savings_account_id' not in inc_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE incomes ADD COLUMN savings_account_id INTEGER NULL "
+                "REFERENCES savings_accounts(id);"
+            ))
+            conn.commit()
+    # savings_accounts: image columns
+    sav_columns = [c['name'] for c in inspector.get_columns('savings_accounts')]
+    if 'image_data' not in sav_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE savings_accounts ADD COLUMN image_data BYTEA;"))
+            conn.commit()
+    if 'image_mime' not in sav_columns:
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE savings_accounts ADD COLUMN image_mime VARCHAR(50);"))
+            conn.commit()
+    # Seed system «Накопления» category
+    if not Category.query.filter_by(name='Накопления', user_id=None).first():
+        db.session.add(Category(
+            name='Накопления', icon='bi-piggy-bank', color='#0d6efd', user_id=None,
+        ))
+        db.session.commit()
+
+if __name__ == '__main__':
+    host  = os.getenv('FLASK_HOST', '127.0.0.1')
+    port  = int(os.getenv('FLASK_PORT', 5000))
+    debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host=host, port=port, debug=debug)

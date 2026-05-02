@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.pyc
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Переменные окружения (ВАЖНО — не заливать!)
+.env
+.env.local
+
+# macOS мусор
+.DS_Store
+__MACOSX/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Логи
+*.log
+
+# Mac app
+ExpenseTracker.app/
+
+# Claude
+.claude/
+
+# Git worktrees
+.worktrees/
+
+# Brainstorm companion
+.superpowers/

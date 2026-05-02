@@ -1,0 +1,195 @@
+{% extends 'base.html' %}
+{% block title %}Доходы — {{ month }}/{{ year }}{% endblock %}
+
+{% block modals %}
+<!-- Модал подтверждения удаления -->
+<div class="modal fade" id="confirmIncomeDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить доход?</div>
+                <div class="text-muted small mt-1">Это действие нельзя отменить</div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4" id="confirmIncomeDeleteBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="incomeDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <span class="badge rounded-pill bg-success fs-6">
+                    <i class="bi bi-arrow-down-circle me-1"></i>Доход
+                </span>
+                <button type="button" class="btn-close ms-auto" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div class="mb-3">
+                    <div id="idSource" class="fw-bold fs-5"></div>
+                    <div id="idDescription" class="text-muted small mt-1"></div>
+                    <div id="idNotes" class="text-muted small fst-italic mt-1"></div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <div>
+                        <div class="text-muted small">Сумма</div>
+                        <div id="idAmount" class="fw-bold fs-4 text-success"></div>
+                    </div>
+                    <div class="text-end">
+                        <div class="text-muted small">Дата</div>
+                        <div id="idDate" class="fw-semibold"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _pendingIncomeDeleteForm = null;
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.income-delete-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            _pendingIncomeDeleteForm = this;
+            const modalEl = document.getElementById('confirmIncomeDeleteModal');
+            if (modalEl.parentElement !== document.body) document.body.appendChild(modalEl);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    });
+    document.getElementById('confirmIncomeDeleteBtn').addEventListener('click', function() {
+        if (_pendingIncomeDeleteForm) {
+            bootstrap.Modal.getInstance(document.getElementById('confirmIncomeDeleteModal')).hide();
+            _pendingIncomeDeleteForm.submit();
+        }
+    });
+});
+
+function openIncomeDetail(el) {
+    const inc = JSON.parse(el.dataset.inc);
+
+    document.getElementById('idSource').textContent = inc.source;
+
+    const descEl = document.getElementById('idDescription');
+    descEl.textContent = inc.description || '';
+    descEl.style.display = inc.description ? '' : 'none';
+
+    const notesEl = document.getElementById('idNotes');
+    notesEl.textContent = inc.notes || '';
+    notesEl.style.display = inc.notes ? '' : 'none';
+
+    document.getElementById('idAmount').textContent = '+' + inc.amount + ' ₽';
+    document.getElementById('idDate').textContent = inc.date;
+
+    const modalEl = document.getElementById('incomeDetailModal');
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-arrow-down-circle-fill text-success me-2"></i>Доходы
+    </h4>
+    <a href="{{ url_for('income_add', ret_year=year, ret_month=month) }}" class="btn grad-income btn-sm pulse-btn">
+        <i class="bi bi-plus-lg me-1"></i>Добавить доход
+    </a>
+</div>
+
+<!-- Фильтр -->
+<form class="filter-form d-flex gap-2 flex-wrap mb-4" method="get">
+    <select name="month" class="form-select form-select-sm" style="width:140px"
+            onchange="this.form.submit()">
+        {% for m_num, m_name in months %}
+            <option value="{{ m_num }}" {% if m_num == month %}selected{% endif %}>{{ m_name }}</option>
+        {% endfor %}
+    </select>
+    <input type="number" name="year" value="{{ year }}" class="form-control form-control-sm" style="width:90px"
+           onchange="this.form.submit()">
+    <button class="btn btn-outline-secondary btn-sm" type="submit" title="Применить фильтр">
+        <i class="bi bi-funnel"></i>
+    </button>
+</form>
+
+<!-- Итог -->
+<div class="card summary-card grad-income mb-4">
+    <div class="card-body d-flex justify-content-between align-items-center">
+        <div>
+            <div class="small opacity-75">Всего получено</div>
+            <div class="fs-2 fw-bold">{{ "%.2f"|format(total) }} ₽</div>
+        </div>
+        <i class="bi bi-wallet-fill" style="font-size:3rem;opacity:.4"></i>
+    </div>
+</div>
+
+<div>
+    {% for inc in incomes %}
+    <div class="record-card stagger-item d-flex justify-content-between align-items-start gap-2">
+        <div style="min-width:0;cursor:pointer;flex:1"
+             role="button"
+             tabindex="0"
+             onclick="openIncomeDetail(this)"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openIncomeDetail(this)}"
+             data-inc='{
+                "source": {{ inc.source | tojson }},
+                "description": {{ (inc.description or "") | tojson }},
+                "notes": {{ (inc.notes or "") | tojson }},
+                "amount": "{{ "%.2f"|format(inc.amount|float) }}",
+                "date": "{{ inc.income_date.strftime("%d.%m.%Y") }}"
+             }'>
+            <div class="fw-semibold text-truncate d-flex align-items-center gap-1 flex-wrap">
+                <i class="bi bi-arrow-down-circle text-success me-1"></i>{{ inc.source }}
+                {% if inc.savings_account %}
+                    <span class="badge" style="font-size:.7rem;background:{{ inc.savings_account.color }}22;color:{{ inc.savings_account.color }};border:1px solid {{ inc.savings_account.color }}55">
+                        <i class="bi bi-piggy-bank me-1"></i>{{ inc.savings_account.name }}
+                    </span>
+                {% endif %}
+            </div>
+            <div class="text-muted small text-truncate">{{ inc.description or '—' }}</div>
+            {% if inc.notes %}
+            <div class="text-muted small fst-italic text-truncate">{{ inc.notes }}</div>
+            {% endif %}
+            <div class="text-muted small">{{ inc.income_date.strftime('%d.%m.%Y') }}</div>
+        </div>
+        <div class="text-end flex-shrink-0">
+            <div class="fw-bold fs-6 text-success">+{{ "%.2f"|format(inc.amount|float) }} ₽</div>
+            <div class="d-flex gap-1 mt-1 justify-content-end">
+                <a href="{{ url_for('income_edit', inc_id=inc.id, ret_year=year, ret_month=month) }}"
+                   class="btn btn-sm btn-outline-secondary" style="min-height:34px;padding:4px 8px"
+                   aria-label="Редактировать доход">
+                    <i class="bi bi-pencil" aria-hidden="true"></i>
+                </a>
+                <form method="post" action="{{ url_for('income_delete', inc_id=inc.id) }}"
+                      class="d-inline income-delete-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="ret_year"  value="{{ year }}">
+                    <input type="hidden" name="ret_month" value="{{ month }}">
+                    <button class="btn btn-sm btn-outline-danger" style="min-height:34px;padding:4px 8px"
+                            aria-label="Удалить доход">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-inbox" aria-hidden="true" style="font-size:2.5rem;opacity:.3"></i>
+        <div class="mt-2">Доходов за этот месяц нет</div>
+        <a href="{{ url_for('income_add', ret_year=year, ret_month=month) }}" class="btn grad-income btn-sm mt-3">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Добавить первый доход
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

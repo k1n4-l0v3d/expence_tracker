@@ -1,0 +1,305 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Редактировать' if acc else 'Новый' }} счёт{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-md-7 col-lg-6">
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-body fw-semibold border-0 pt-3">
+        <i class="bi bi-{% if acc %}pencil{% else %}plus-lg{% endif %} text-primary me-2"></i>
+        {{ 'Редактировать счёт' if acc else 'Новый накопительный счёт' }}
+    </div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data" id="savingsForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="icon" id="selectedIcon"
+                   value="{{ acc.icon if acc else 'bi-piggy-bank' }}">
+            <input type="hidden" name="clear_image" id="clearImage" value="0">
+
+            <!-- Название -->
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Название *</label>
+                <input type="text" name="name" class="form-control"
+                       maxlength="100"
+                       value="{{ acc.name if acc else '' }}"
+                       placeholder="Отпуск, Машина, Подушка…" required>
+            </div>
+
+            <!-- Цвет + Целевая сумма -->
+            <div class="row g-3 mb-4">
+                <div class="col-6">
+                    <label class="form-label fw-semibold">Цвет акцента</label>
+                    <input type="color" name="color" id="colorPicker"
+                           class="form-control form-control-color w-100"
+                           value="{{ acc.color if acc else '#0d6efd' }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-semibold">Целевая сумма</label>
+                    <input type="number" name="target_amount" class="form-control"
+                           min="1" step="0.01"
+                           value="{{ acc.target_amount|float if acc and acc.target_amount else '' }}"
+                           placeholder="необязательно">
+                </div>
+            </div>
+
+            <!-- Иконка / Фото -->
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Изображение</label>
+
+                <!-- Табы -->
+                <div class="d-flex gap-2 mb-3">
+                    <button type="button" id="tabIconBtn"
+                            class="btn btn-sm {% if not (acc and acc.image_data) %}btn-primary{% else %}btn-outline-secondary{% endif %} flex-fill"
+                            onclick="switchTab('icon')">
+                        <i class="bi bi-grid me-1"></i>Иконка
+                    </button>
+                    <button type="button" id="tabPhotoBtn"
+                            class="btn btn-sm {% if acc and acc.image_data %}btn-primary{% else %}btn-outline-secondary{% endif %} flex-fill"
+                            onclick="switchTab('photo')">
+                        <i class="bi bi-image me-1"></i>Своё фото
+                    </button>
+                </div>
+
+                <!-- Пикер иконок -->
+                <div id="tabIcon" class="{{ 'd-none' if acc and acc.image_data }}">
+                    <div class="icons-grid">
+                        {% for icon_cls, icon_label in savings_icons %}
+                        <div class="icon-item {% if (acc.icon if acc else 'bi-piggy-bank') == icon_cls %}selected{% endif %}"
+                             data-icon="{{ icon_cls }}"
+                             onclick="selectIcon('{{ icon_cls }}', this)"
+                             title="{{ icon_label }}">
+                            <i class="bi {{ icon_cls }}"></i>
+                            <span>{{ icon_label }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Загрузка фото -->
+                <div id="tabPhoto" class="{{ '' if acc and acc.image_data else 'd-none' }}">
+                    <div id="photoDropZone" class="photo-drop-zone" onclick="document.getElementById('imageInput').click()">
+                        {% if acc and acc.image_data %}
+                        <img id="photoPreview"
+                             src="{{ url_for('savings_image', acc_id=acc.id) }}"
+                             class="photo-preview-img">
+                        <div id="photoPlaceholder" class="d-none">
+                        {% else %}
+                        <img id="photoPreview" class="photo-preview-img d-none">
+                        <div id="photoPlaceholder">
+                        {% endif %}
+                            <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+                            <div class="text-muted mt-2">Нажмите или перетащите файл</div>
+                            <div class="text-muted small">JPEG, PNG, WebP · до 2 МБ</div>
+                        </div>
+                        <input type="file" name="image" id="imageInput"
+                               accept="image/jpeg,image/png,image/webp"
+                               class="d-none" onchange="previewPhoto(this)">
+                    </div>
+                    {% if acc and acc.image_data %}
+                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 w-100"
+                            onclick="clearPhoto()">
+                        <i class="bi bi-trash me-1"></i>Удалить фото и вернуть иконку
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Превью -->
+            <div class="d-flex align-items-center gap-3 p-3 rounded-3 mb-4"
+                 id="previewCard"
+                 style="background:var(--bs-tertiary-bg)">
+                <div id="previewIconWrap"
+                     class="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
+                     style="width:48px;height:48px">
+                    {% if acc and acc.image_data %}
+                    <img id="previewImg"
+                         src="{{ url_for('savings_image', acc_id=acc.id) }}"
+                         class="rounded-3"
+                         style="width:48px;height:48px;object-fit:cover">
+                    <i id="previewIcon" class="bi {{ acc.icon if acc else 'bi-piggy-bank' }} fs-4 d-none"></i>
+                    {% else %}
+                    <img id="previewImg" class="rounded-3 d-none"
+                         style="width:48px;height:48px;object-fit:cover">
+                    <i id="previewIcon" class="bi {{ acc.icon if acc else 'bi-piggy-bank' }} fs-4"></i>
+                    {% endif %}
+                </div>
+                <div>
+                    <div class="fw-semibold" id="previewName">{{ acc.name if acc else 'Название счёта' }}</div>
+                    <div class="text-muted small">Превью карточки</div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn grad-primary btn-sm px-4">Сохранить</button>
+                <a href="{{ url_for('savings_list') }}"
+                   class="btn btn-outline-secondary btn-sm">Отмена</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.icons-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+}
+.icon-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 6px;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .15s;
+    background: var(--bs-tertiary-bg);
+}
+.icon-item:hover {
+    background: var(--bs-secondary-bg);
+    transform: translateY(-1px);
+}
+.icon-item.selected {
+    border-color: var(--acc-color, #0d6efd);
+    background: var(--acc-color-bg, #0d6efd22);
+}
+.icon-item i { font-size: 1.4rem; }
+.icon-item span { font-size: .65rem; color: var(--bs-secondary-color); text-align: center; line-height: 1.2; }
+
+.photo-drop-zone {
+    border: 2px dashed var(--bs-border-color);
+    border-radius: 12px;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+    overflow: hidden;
+}
+.photo-drop-zone:hover { border-color: #0d6efd; background: #0d6efd08; }
+.photo-drop-zone.drag-over { border-color: #0d6efd; background: #0d6efd14; }
+.photo-preview-img {
+    max-width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+    border-radius: 8px;
+}
+</style>
+<script>
+const colorPicker   = document.getElementById('colorPicker');
+const previewIcon   = document.getElementById('previewIcon');
+const previewImg    = document.getElementById('previewImg');
+const previewIconWrap = document.getElementById('previewIconWrap');
+const previewNameEl = document.getElementById('previewName');
+const nameInput     = document.querySelector('input[name="name"]');
+
+// Init accent color
+updateAccentColor(colorPicker.value);
+colorPicker.addEventListener('input', e => updateAccentColor(e.target.value));
+nameInput.addEventListener('input',  e => { previewNameEl.textContent = e.target.value || 'Название счёта'; });
+
+function updateAccentColor(hex) {
+    document.querySelectorAll('.icon-item.selected').forEach(el => {
+        el.style.borderColor = hex;
+        el.style.background  = hex + '22';
+    });
+    previewIconWrap.style.background = hex + '22';
+    previewIcon.style.color = hex;
+}
+
+function selectIcon(cls, el) {
+    document.querySelectorAll('.icon-item').forEach(i => {
+        i.classList.remove('selected');
+        i.style.borderColor = '';
+        i.style.background  = '';
+    });
+    el.classList.add('selected');
+    const hex = colorPicker.value;
+    el.style.borderColor = hex;
+    el.style.background  = hex + '22';
+
+    document.getElementById('selectedIcon').value = cls;
+    previewIcon.className = `bi ${cls} fs-4`;
+
+    // show icon in preview, hide photo
+    previewIcon.classList.remove('d-none');
+    previewImg.classList.add('d-none');
+    previewIcon.style.color = hex;
+}
+
+function switchTab(tab) {
+    const isIcon = tab === 'icon';
+    document.getElementById('tabIcon').classList.toggle('d-none', !isIcon);
+    document.getElementById('tabPhoto').classList.toggle('d-none', isIcon);
+    document.getElementById('tabIconBtn').className  = `btn btn-sm flex-fill ${isIcon  ? 'btn-primary' : 'btn-outline-secondary'}`;
+    document.getElementById('tabPhotoBtn').className = `btn btn-sm flex-fill ${!isIcon ? 'btn-primary' : 'btn-outline-secondary'}`;
+    if (isIcon) {
+        // switching back to icon: clear photo input, restore icon preview
+        document.getElementById('imageInput').value = '';
+        document.getElementById('clearImage').value = '1';
+        previewIcon.classList.remove('d-none');
+        previewImg.classList.add('d-none');
+    } else {
+        document.getElementById('clearImage').value = '0';
+    }
+}
+
+function previewPhoto(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    previewImg.src = url;
+    previewImg.classList.remove('d-none');
+    previewIcon.classList.add('d-none');
+    document.getElementById('photoPreview').src = url;
+    document.getElementById('photoPreview').classList.remove('d-none');
+    document.getElementById('photoPlaceholder').classList.add('d-none');
+    document.getElementById('clearImage').value = '0';
+}
+
+function clearPhoto() {
+    document.getElementById('clearImage').value = '1';
+    document.getElementById('imageInput').value = '';
+    document.getElementById('photoPreview').classList.add('d-none');
+    document.getElementById('photoPlaceholder').classList.remove('d-none');
+    // restore icon in preview
+    previewIcon.classList.remove('d-none');
+    previewImg.classList.add('d-none');
+    // switch to icon tab
+    switchTab('icon');
+}
+
+// Drag & drop
+const dropZone = document.getElementById('photoDropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    const input = document.getElementById('imageInput');
+    input.files = dt.files;
+    previewPhoto(input);
+});
+
+// Init: apply color to already-selected icon
+document.querySelectorAll('.icon-item.selected').forEach(el => {
+    el.style.borderColor = colorPicker.value;
+    el.style.background  = colorPicker.value + '22';
+});
+</script>
+{% endblock %}
