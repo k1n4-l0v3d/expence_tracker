@@ -122,9 +122,18 @@
         document.getElementById('chat-typing')?.remove();
     }
 
+    function extractMsg(s) {
+        const full = s.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (full) return full[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        const partial = s.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        if (partial && partial[1]) return partial[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        return null;
+    }
+
     async function send() {
         const input   = document.getElementById('chat-input');
         const sendBtn = document.getElementById('chat-send');
+        const msgs    = document.getElementById('chat-messages');
         const text    = input.value.trim();
         if (!text) return;
 
@@ -139,27 +148,70 @@
 
         showTyping();
 
+        let bubble = null;
+        let accumulated = '';
+        let shown = 0;
+
         try {
-            const res  = await fetch('/api/chat', {
+            const res = await fetch('/api/chat', {
                 method:  'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken':  csrf(),
-                },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
                 body: JSON.stringify({ message: text, history: history.slice(-10) }),
             });
-            const data = await res.json();
-            hideTyping();
 
-            const role = data.ok ? 'bot' : 'error';
-            appendBubble(data.message, role);
+            const reader = res.body.getReader();
+            const dec    = new TextDecoder();
+            let buf = '';
 
-            if (data.ok) {
-                history.push({ role: 'assistant', content: data.message });
-                if (history.length > 20) history.splice(0, history.length - 20);
-                saveHistory(history);
-                if (data.reload) {
-                    setTimeout(() => window.location.reload(), 1500);
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buf += dec.decode(value, { stream: true });
+                const lines = buf.split('\n');
+                buf = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let evt;
+                    try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+                    if (evt.err) {
+                        hideTyping();
+                        appendBubble('Ошибка: ' + evt.err, 'error');
+                        return;
+                    }
+
+                    if (evt.d !== undefined) {
+                        accumulated += evt.d;
+                        const msg = extractMsg(accumulated);
+                        if (msg !== null && msg.length > shown) {
+                            if (!bubble) { hideTyping(); bubble = _renderBubble('', 'bot'); }
+                            bubble.textContent = msg;
+                            msgs.scrollTop = msgs.scrollHeight;
+                            shown = msg.length;
+                        }
+                    }
+
+                    if (evt.done) {
+                        hideTyping();
+                        const finalRole = evt.ok ? 'bot' : 'error';
+                        if (!bubble) { bubble = _renderBubble('', finalRole); }
+                        else if (!evt.ok) bubble.className = 'chat-bubble error';
+                        bubble.textContent = evt.msg;
+                        msgs.scrollTop = msgs.scrollHeight;
+
+                        const saved = loadMessages();
+                        saved.push({ text: evt.msg, role: finalRole });
+                        saveMessages(saved);
+
+                        if (evt.ok) {
+                            history.push({ role: 'assistant', content: evt.msg });
+                            if (history.length > 20) history.splice(0, history.length - 20);
+                            saveHistory(history);
+                        }
+                        if (evt.reload) setTimeout(() => window.location.reload(), 1500);
+                    }
                 }
             }
         } catch {

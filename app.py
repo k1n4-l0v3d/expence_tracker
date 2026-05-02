@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, abort, session, send_file, Response, stream_with_context
 from urllib.parse import urlparse, urljoin
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (LoginManager, UserMixin, login_user, logout_user,
@@ -2507,6 +2507,10 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
     return None
 
 
+CHAT_WRITE_ACTIONS = {'add_expense', 'add_income', 'edit_expense', 'delete_expense',
+                      'edit_income', 'delete_income'}
+
+
 @app.route('/api/chat', methods=['POST'])
 @login_required
 @ban_check
@@ -2517,7 +2521,7 @@ def api_chat():
     try:
         data = request.get_json(silent=True) or {}
         user_message = (data.get('message') or '').strip()
-        history = data.get('history') or []
+        history_msgs = data.get('history') or []
 
         if not user_message:
             return jsonify({'message': 'Пустое сообщение.', 'ok': False}), 400
@@ -2526,36 +2530,52 @@ def api_chat():
         system_prompt = _build_system_prompt(ctx)
 
         messages = [{'role': 'system', 'content': system_prompt}]
-        for h in history[-10:]:
+        for h in history_msgs[-10:]:
             if h.get('role') in ('user', 'assistant') and h.get('content'):
                 messages.append({'role': h['role'], 'content': str(h['content'])})
         messages.append({'role': 'user', 'content': user_message})
-
-        response = _groq_client.chat.completions.create(
-            model='llama-3.1-8b-instant',
-            messages=messages,
-            response_format={'type': 'json_object'},
-            temperature=0.1,
-            max_tokens=256,
-        )
-        raw = response.choices[0].message.content
-        parsed = json.loads(raw)
     except Exception as e:
-        app.logger.error('Groq chat error: %s', e, exc_info=True)
+        app.logger.error('Chat setup error: %s', e, exc_info=True)
         return jsonify({'message': f'Ошибка: {e}', 'ok': False}), 503
 
-    action  = parsed.get('action', 'none')
-    params  = parsed.get('params') or {}
-    message = parsed.get('message', '')
+    uid = current_user.id
 
-    WRITE_ACTIONS = {'add_expense', 'add_income', 'edit_expense', 'delete_expense',
-                     'edit_income', 'delete_income'}
+    @stream_with_context
+    def generate():
+        full = ''
+        try:
+            stream = _groq_client.chat.completions.create(
+                model='llama-3.1-8b-instant',
+                messages=messages,
+                response_format={'type': 'json_object'},
+                temperature=0.1,
+                max_tokens=256,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content or ''
+                if delta:
+                    full += delta
+                    yield f"data: {json.dumps({'d': delta})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'err': str(e)})}\n\n"
+            return
 
-    error = _execute_chat_action(action, params, current_user.id, ctx)
-    if error:
-        return jsonify({'message': error, 'ok': False})
+        try:
+            parsed = json.loads(full)
+        except Exception:
+            yield f"data: {json.dumps({'done': True, 'ok': False, 'msg': 'Ошибка ответа ИИ.'})}\n\n"
+            return
 
-    return jsonify({'message': message, 'ok': True, 'reload': action in WRITE_ACTIONS})
+        action = parsed.get('action', 'none')
+        params = parsed.get('params') or {}
+        msg    = parsed.get('message', '')
+
+        err = _execute_chat_action(action, params, uid, ctx)
+        yield f"data: {json.dumps({'done': True, 'ok': not bool(err), 'msg': err or msg, 'reload': action in CHAT_WRITE_ACTIONS and not err})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 with app.app_context():

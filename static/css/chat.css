@@ -182,7 +182,12 @@
 #chat-send:hover    { background: #4f46e5; }
 #chat-send:disabled { background: #94a3b8; cursor: not-allowed; }
 
+/* На мобильных поднимаем над bottom-nav (60px) */
+@media (max-width: 991.98px) {
+    #chat-toggle { bottom: 76px; }
+    #chat-popup  { bottom: 140px; }
+}
+
 @media (max-width: 400px) {
-    #chat-popup  { width: calc(100vw - 16px); right: 8px; bottom: 80px; }
-    #chat-toggle { bottom: 16px; right: 16px; }
+    #chat-popup  { width: calc(100vw - 16px); right: 8px; }
 }
