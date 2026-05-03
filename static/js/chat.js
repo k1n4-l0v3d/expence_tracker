@@ -40,7 +40,10 @@
       <div class="chat-status">● Groq / Llama3</div>
     </div>
   </div>
-  <button id="chat-close" title="Закрыть"><i class="bi bi-x-lg"></i></button>
+  <div style="display:flex;align-items:center;gap:12px">
+    <button id="chat-clear" title="Очистить историю"><i class="bi bi-trash3"></i></button>
+    <button id="chat-close" title="Закрыть"><i class="bi bi-x-lg"></i></button>
+  </div>
 </div>
 <div id="chat-messages"></div>
 <div id="chat-input-area">
@@ -60,6 +63,17 @@
         popup.addEventListener('click', (e) => e.stopPropagation());
         document.getElementById('chat-close').addEventListener('click', () => {
             popup.classList.remove('open');
+        });
+        document.getElementById('chat-clear').addEventListener('click', () => {
+            sessionStorage.removeItem(STORAGE_KEY);
+            sessionStorage.removeItem(STORAGE_MSGS);
+            history.splice(0, history.length);
+            const msgs = document.getElementById('chat-messages');
+            msgs.innerHTML = '';
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble bot';
+            bubble.innerHTML = 'История очищена. Чем могу помочь?';
+            msgs.appendChild(bubble);
         });
         document.addEventListener('click', () => popup.classList.remove('open'));
 

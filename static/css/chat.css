@@ -67,7 +67,7 @@
     font-size: .95rem;
 }
 #chat-header .chat-status { font-size: .72rem; opacity: .8; }
-#chat-close {
+#chat-close, #chat-clear {
     background: none;
     border: none;
     color: white;
@@ -77,7 +77,8 @@
     padding: 0;
     line-height: 1;
 }
-#chat-close:hover { opacity: 1; }
+#chat-close:hover, #chat-clear:hover { opacity: 1; }
+#chat-clear { font-size: .95rem; }
 
 /* ── Messages ─────────────────────────────────────── */
 #chat-messages {

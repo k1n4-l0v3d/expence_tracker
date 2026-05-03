@@ -83,6 +83,8 @@ def get_client_ip() -> str:
 load_dotenv()
 
 app = Flask(__name__)
+import logging
+logging.basicConfig(level=logging.INFO)
 flask_app = app  # alias for tests
 
 
@@ -2333,6 +2335,21 @@ def api_payment_days():
 # ─── ИИ-помощник (Groq) ───────────────────────────────────────────────────────
 _groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'), timeout=60.0) if os.getenv('GROQ_API_KEY') else None
 
+_SAVINGS_ICON_MAP = {label.lower(): cls for cls, label in SAVINGS_ICONS}
+
+_SAVINGS_COLOR_MAP = {
+    'синий': '#0d6efd', 'blue': '#0d6efd',
+    'зелёный': '#198754', 'зеленый': '#198754', 'green': '#198754',
+    'красный': '#dc3545', 'red': '#dc3545',
+    'жёлтый': '#ffc107', 'желтый': '#ffc107', 'yellow': '#ffc107',
+    'оранжевый': '#fd7e14', 'orange': '#fd7e14',
+    'фиолетовый': '#6f42c1', 'purple': '#6f42c1',
+    'розовый': '#e83e8c', 'pink': '#e83e8c',
+    'голубой': '#0dcaf0', 'cyan': '#0dcaf0',
+    'серый': '#6c757d', 'gray': '#6c757d',
+    'чёрный': '#212529', 'черный': '#212529', 'black': '#212529',
+}
+
 
 def _build_chat_context(user_id: int) -> dict:
     today = date.today()
@@ -2386,22 +2403,57 @@ def _build_system_prompt(ctx: dict) -> str:
         for i in ctx['recent_income']
     ) or '-'
 
-    return f"""Финансовый ассистент. Отвечай ТОЛЬКО на русском. Отвечай ТОЛЬКО валидным JSON:
-{{"message":"текст","action":"действие","params":{{}}}}
+    return f"""You are a financial assistant. Always respond in Russian. Respond ONLY with valid JSON:
+{{"message":"response in Russian","action":"action_name","params":{{}}}}
 
-Действия: add_expense(amount,category_name,description?,date?), add_income(amount,source,description?,date?), edit_expense(expense_id,amount?,category_name?,description?), delete_expense(expense_id), edit_income(income_id,amount?,source?), delete_income(income_id), none(для показа данных и вопросов).
+ACTIONS:
+- add_expense: {{"amount":number,"category_name":"string","description":"string","notes":"string","date":"YYYY-MM-DD"}} (description/notes/date optional)
+- add_income: {{"amount":number,"source":"string","description":"string","notes":"string","date":"YYYY-MM-DD"}} (description/notes/date optional)
+- edit_expense: {{"expense_id":number,"amount":number,"category_name":"string","description":"string","notes":"string"}} (all except id optional)
+- delete_expense: {{"expense_id":number}}
+- edit_income: {{"income_id":number,"amount":number,"source":"string","description":"string","notes":"string"}} (all except id optional)
+- delete_income: {{"income_id":number}}
+- add_savings: {{"name":"string","target_amount":number,"icon":"icon_name","color":"color_name_or_hex"}} (only name required)
+- edit_savings: {{"savings_id":number,"name":"string","target_amount":number,"icon":"icon_name","color":"color_name_or_hex"}} (all except id optional)
+- delete_savings: {{"savings_id":number}}
+- set_budget: {{"category_name":"string","amount":number,"month":number,"year":number}} (month/year optional, default current)
+- delete_budget: {{"category_name":"string","month":number,"year":number}} (month/year optional)
+- set_payment_days: {{"salary_day":number,"advance_day":number}} (1–31, both optional, set only what user specifies)
+- none: {{}} — ONLY for showing data or answering questions
 
-Сегодня: {ctx['today']}
-Категории: {cat_names}
-Месяц: доход {ctx['monthly_income']:.0f}₽, расход {ctx['monthly_expenses']:.0f}₽, остаток {ctx['remaining']:.0f}₽
+Available icons for savings: Копилка, Путешествие, Авто, Жильё, Техника, Телефон, Здоровье, Образование, Подушка, Подарок, Хобби, Спорт, Шопинг, Вклад, Деньги, Любовь, Мечта, Ремонт, Фото, Срочное
+Available colors for savings: синий, зелёный, красный, жёлтый, оранжевый, фиолетовый, розовый, голубой, серый, чёрный (or any #RRGGBB hex)
 
-Расходы:
+CRITICAL RULES — follow exactly:
+1. "добавь расход" / "add expense" → action MUST be "add_expense". Amount field is always "amount".
+2. "добавь доход" / "add income" → action MUST be "add_income". Amount field is always "amount".
+3. NEVER use action "none" when user asks to add, create, or record something. ALWAYS create a new record.
+4. NEVER check for duplicates. Create new record every time user asks, even if identical one exists.
+5. Match category_name to closest from list. If unclear, use "Другое" or first available.
+6. Date defaults to today ({ctx['today']}) if not specified.
+7. The recent records below are ONLY for edit/delete. Do NOT use them to block add requests.
+
+EXAMPLES of correct responses:
+User: "добавь расход 500 на еду" → {{"message":"Расход 500₽ добавлен","action":"add_expense","params":{{"amount":500,"category_name":"Продукты"}}}}
+User: "добавь доход 1000 зарплата" → {{"message":"Доход 1000₽ добавлен","action":"add_income","params":{{"amount":1000,"source":"Зарплата"}}}}
+User: "добавь доход в июне 600 источник тест" → {{"message":"Доход 600₽ добавлен","action":"add_income","params":{{"amount":600,"source":"тест","date":"2026-06-01"}}}}
+User: "добавь накопление отпуск с целью 10000" → {{"message":"Накопительный счёт «Отпуск» создан","action":"add_savings","params":{{"name":"Отпуск","target_amount":10000,"icon":"Путешествие","color":"синий"}}}}
+User: "создай копилку машина зелёного цвета" → {{"message":"Накопительный счёт «Машина» создан","action":"add_savings","params":{{"name":"Машина","icon":"Авто","color":"зелёный"}}}}
+User: "поставь лимит на еду 5000 в мае" → {{"message":"Лимит на «Продукты» в мае установлен: 5000₽","action":"set_budget","params":{{"category_name":"Продукты","amount":5000,"month":5}}}}
+User: "убери лимит на кафе" → {{"message":"Лимит на «Кафе и рестораны» удалён","action":"delete_budget","params":{{"category_name":"Кафе и рестораны"}}}}
+User: "зарплата 15 числа аванс 30" → {{"message":"Даты выплат установлены: зарплата 15-го, аванс 30-го","action":"set_payment_days","params":{{"salary_day":15,"advance_day":30}}}}
+User: "поставь день зарплаты 10" → {{"message":"День зарплаты установлен: 10-е","action":"set_payment_days","params":{{"salary_day":10}}}}
+
+USER CONTEXT:
+Today: {ctx['today']}
+Categories: {cat_names}
+This month: income {ctx['monthly_income']:.0f}₽, expenses {ctx['monthly_expenses']:.0f}₽, remaining {ctx['remaining']:.0f}₽
+
+Recent expenses (use ID only for edit/delete):
 {exp_lines}
 
-Доходы:
-{inc_lines}
-
-Правила: подбирай ближайшую категорию из списка; для чтения данных используй action=none; дату не указывай если не сказано — используй сегодня."""
+Recent income (use ID only for edit/delete):
+{inc_lines}"""
 
 
 def _find_category_by_name(name: str, categories: list) -> 'Category | None':
@@ -2434,6 +2486,7 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
             category_id=cat.id,
             amount=float(params['amount']),
             description=params.get('description') or None,
+            notes=params.get('notes') or None,
             expense_date=exp_date,
             is_planned=False,
             is_spent=True,
@@ -2454,6 +2507,7 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
             amount=float(params['amount']),
             source=params.get('source', 'Прочее').strip(),
             description=params.get('description') or None,
+            notes=params.get('notes') or None,
             income_date=inc_date,
         )
         db.session.add(inc)
@@ -2472,6 +2526,8 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
                 exp.category_id = cat.id
         if params.get('description'):
             exp.description = params['description']
+        if params.get('notes'):
+            exp.notes = params['notes']
         db.session.commit()
         return None
 
@@ -2493,6 +2549,8 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
             inc.source = params['source'].strip()
         if params.get('description'):
             inc.description = params['description']
+        if params.get('notes'):
+            inc.notes = params['notes']
         db.session.commit()
         return None
 
@@ -2504,11 +2562,116 @@ def _execute_chat_action(action: str, params: dict, user_id: int, ctx: dict) -> 
         db.session.commit()
         return None
 
+    if action == 'set_payment_days':
+        user = db.session.get(User, user_id)
+        changed = False
+        if params.get('salary_day') is not None:
+            day = int(params['salary_day'])
+            if 1 <= day <= 31:
+                user.salary_day = day
+                changed = True
+        if params.get('advance_day') is not None:
+            day = int(params['advance_day'])
+            if 1 <= day <= 31:
+                user.advance_day = day
+                changed = True
+        if changed:
+            db.session.commit()
+        return None
+
+    if action == 'set_budget':
+        cat = _find_category_by_name(params.get('category_name', ''), ctx['categories'])
+        if not cat:
+            return f"Категория «{params.get('category_name')}» не найдена. Доступные: {', '.join(c.name for c in ctx['categories'])}"
+        try:
+            amount = float(params['amount'])
+        except (KeyError, TypeError, ValueError):
+            return 'Укажи сумму лимита.'
+        today = date.today()
+        year  = int(params.get('year')  or today.year)
+        month = int(params.get('month') or today.month)
+        budget = MonthlyBudget.query.filter_by(
+            user_id=user_id, category_id=cat.id, year=year, month=month
+        ).first()
+        if budget:
+            budget.amount = amount
+        else:
+            db.session.add(MonthlyBudget(user_id=user_id, category_id=cat.id,
+                                         year=year, month=month, amount=amount))
+        db.session.commit()
+        return None
+
+    if action == 'delete_budget':
+        cat = _find_category_by_name(params.get('category_name', ''), ctx['categories'])
+        if not cat:
+            return f"Категория «{params.get('category_name')}» не найдена."
+        today = date.today()
+        year  = int(params.get('year')  or today.year)
+        month = int(params.get('month') or today.month)
+        budget = MonthlyBudget.query.filter_by(
+            user_id=user_id, category_id=cat.id, year=year, month=month
+        ).first()
+        if budget:
+            db.session.delete(budget)
+            db.session.commit()
+        return None
+
+    if action == 'add_savings':
+        name = (params.get('name') or '').strip()
+        if not name:
+            return 'Укажи название накопительного счёта.'
+        icon_raw = (params.get('icon') or 'копилка').lower().strip()
+        icon_cls = _SAVINGS_ICON_MAP.get(icon_raw, 'bi-piggy-bank')
+        color_raw = (params.get('color') or '').lower().strip()
+        if re.fullmatch(r'#[0-9a-fA-F]{6}', color_raw):
+            color = color_raw
+        else:
+            color = _SAVINGS_COLOR_MAP.get(color_raw, '#0d6efd')
+        target = None
+        if params.get('target_amount'):
+            try:
+                target = float(params['target_amount'])
+            except (ValueError, TypeError):
+                pass
+        acc = SavingsAccount(user_id=user_id, name=name, icon=icon_cls,
+                             color=color, target_amount=target)
+        db.session.add(acc)
+        db.session.commit()
+        return None
+
+    if action == 'edit_savings':
+        acc = SavingsAccount.query.filter_by(id=params.get('savings_id'), user_id=user_id).first()
+        if not acc:
+            return 'Накопительный счёт не найден.'
+        if params.get('name'):
+            acc.name = params['name'].strip()
+        if params.get('icon'):
+            acc.icon = _SAVINGS_ICON_MAP.get(params['icon'].lower().strip(), acc.icon)
+        if params.get('color'):
+            c = params['color'].lower().strip()
+            acc.color = c if re.fullmatch(r'#[0-9a-fA-F]{6}', c) else _SAVINGS_COLOR_MAP.get(c, acc.color)
+        if params.get('target_amount') is not None:
+            try:
+                acc.target_amount = float(params['target_amount'])
+            except (ValueError, TypeError):
+                pass
+        db.session.commit()
+        return None
+
+    if action == 'delete_savings':
+        acc = SavingsAccount.query.filter_by(id=params.get('savings_id'), user_id=user_id).first()
+        if not acc:
+            return 'Накопительный счёт не найден.'
+        acc.is_active = False
+        db.session.commit()
+        return None
+
     return None
 
 
 CHAT_WRITE_ACTIONS = {'add_expense', 'add_income', 'edit_expense', 'delete_expense',
-                      'edit_income', 'delete_income'}
+                      'edit_income', 'delete_income', 'add_savings', 'edit_savings',
+                      'delete_savings', 'set_budget', 'delete_budget', 'set_payment_days'}
 
 
 @app.route('/api/chat', methods=['POST'])
@@ -2571,7 +2734,16 @@ def api_chat():
         params = parsed.get('params') or {}
         msg    = parsed.get('message', '')
 
-        err = _execute_chat_action(action, params, uid, ctx)
+        app.logger.info('Chat action=%s params=%s', action, params)
+
+        try:
+            err = _execute_chat_action(action, params, uid, ctx)
+        except Exception as e:
+            app.logger.error('Action execute error: %s', e, exc_info=True)
+            db.session.rollback()
+            yield f"data: {json.dumps({'done': True, 'ok': False, 'msg': f'Ошибка выполнения: {e}'})}\n\n"
+            return
+
         yield f"data: {json.dumps({'done': True, 'ok': not bool(err), 'msg': err or msg, 'reload': action in CHAT_WRITE_ACTIONS and not err})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream',
