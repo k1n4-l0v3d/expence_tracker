@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Нет подключения — Подсчитай!</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8f9fa;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    .header {
+      background: linear-gradient(135deg, #4361ee, #e8115b);
+      color: #fff;
+      width: 100%;
+      max-width: 480px;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 32px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .icon { font-size: 4rem; margin-bottom: 16px; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+    p  { color: #6c757d; margin-bottom: 24px; }
+    button {
+      background: linear-gradient(135deg, #4361ee, #e8115b);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 32px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16" style="margin-right:8px;vertical-align:-3px"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h6a.5.5 0 0 1 .5.5c0 .253.08.644.306.958.207.288.557.542 1.194.542s.987-.254 1.194-.542C9.42 6.644 9.5 6.253 9.5 6a.5.5 0 0 1 .5-.5h6v-2A1.5 1.5 0 0 0 14.5 2h-13z"/><path d="M16 6.5h-5.551a2.678 2.678 0 0 1-.443 1.042C9.613 8.088 8.963 8.5 8 8.5s-1.613-.412-2.006-.958A2.679 2.679 0 0 1 5.551 6.5H0v6A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-6z"/></svg>
+    Подсчитай!
+  </div>
+  <div class="icon">
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="#6c757d" viewBox="0 0 16 16"><path d="M10.706 3.294A12.545 12.545 0 0 0 8 3C5.259 3 2.723 3.737.966 5.003c-.089.08-.187.176-.291.284-.394.415-.749.84-.95 1.168l-.015.025a1 1 0 0 0 1.724 1.012l.014-.023c.12-.195.411-.535.772-.91C3.458 5.466 5.479 5 8 5c.91 0 1.773.084 2.543.24L10.706 3.294zM5.457 7.543A7.031 7.031 0 0 1 8 7c.997 0 1.939.196 2.771.52l-1.44 1.44a4.519 4.519 0 0 0-1.33-.206c-.61 0-1.185.131-1.699.36L5.457 7.543zm-1.334 1.334L2.707 10.293A1 1 0 0 0 4.12 11.706l1.416-1.416A5.499 5.499 0 0 1 8 9.5c.92 0 1.785.223 2.535.618l1.451-1.45C11.017 8.226 9.565 7.5 8 7.5c-1.292 0-2.49.37-3.497 1.01A6.996 6.996 0 0 0 4.123 8.877zM8 11.5a3.5 3.5 0 0 0-2.354.906L8 15l2.354-2.594A3.5 3.5 0 0 0 8 11.5z"/></svg>
+  </div>
+  <h1>Нет подключения</h1>
+  <p>Проверьте интернет-соединение и попробуйте снова.</p>
+  <button onclick="window.location.reload()">Повторить</button>
+</body>
+</html>

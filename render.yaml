@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: podschitay
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn app:app --timeout 120"
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.0

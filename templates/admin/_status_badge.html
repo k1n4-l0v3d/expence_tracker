@@ -1,0 +1,11 @@
+{% if user.role == 'admin' %}
+    <span class="badge bg-danger">Админ</span>
+{% elif user.status == 'active' %}
+    <span class="badge bg-success">Активен</span>
+{% elif user.status == 'warned' %}
+    <span class="badge bg-warning text-dark" title="{{ user.warning_note or '' }}">
+        Предупрежд. ×{{ user.warning_count }}
+    </span>
+{% elif user.status == 'banned' %}
+    <span class="badge bg-danger" title="{{ user.ban_reason or '' }}">Заблокирован</span>
+{% endif %}

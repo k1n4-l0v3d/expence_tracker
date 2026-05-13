@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}Подсчитай!{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💸</text></svg>">
+    <meta name="theme-color" content="#4361ee">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/animations.css') }}" rel="stylesheet">
+    {% if current_user.is_authenticated %}
+    <link href="{{ url_for('static', filename='css/chat.css') }}" rel="stylesheet">
+    {% endif %}
+    <script>
+        (function() {
+            const t = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-bs-theme', t);
+        })();
+    </script>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     NAVBAR (десктоп + шапка мобильного)
+════════════════════════════════════════════ -->
+<nav class="navbar navbar-dark navbar-animated navbar-expand-lg">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="{{ url_for('index') if current_user.is_authenticated else url_for('login') }}">
+            <i class="bi bi-wallet2 me-2"></i>Подсчитай!
+        </a>
+
+        <!-- Мобильный правый блок: тема + аватар (вместо бургера) -->
+        <div class="navbar-mobile-right">
+            {% if current_user.is_authenticated %}
+            <button class="btn btn-sm btn-outline-light" id="help-toggle-mobile" title="Инструкция"
+                    onclick="openHelp()">
+                <i class="bi bi-question-lg"></i>
+            </button>
+            {% endif %}
+            <button class="btn btn-sm btn-outline-light" id="theme-toggle-mobile" title="Сменить тему">
+                <i class="bi bi-moon-fill" id="theme-icon-mobile"></i>
+            </button>
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('profile') }}"
+               class="rounded-circle bg-white text-primary fw-bold d-inline-flex align-items-center
+                      justify-content-center text-decoration-none"
+               style="width:34px;height:34px;font-size:{% if current_user.avatar %}1.1rem{% else %}.85rem{% endif %};flex-shrink:0">
+                {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
+            </a>
+            {% endif %}
+        </div>
+
+        <!-- Десктопное меню -->
+        <div class="collapse navbar-collapse" id="nav">
+            <ul class="navbar-nav ms-auto align-items-center">
+                {% if current_user.is_authenticated %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}"
+                       href="{{ url_for('index', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-house"></i><span>Обзор</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if 'expenses' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-list-ul"></i><span>Расходы</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if 'income' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('income_list', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-arrow-down-circle"></i><span>Доходы</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'budget' %}active{% endif %}"
+                       href="{{ url_for('budget', year=nav_year, month=nav_month) }}">
+                        <i class="bi bi-piggy-bank"></i><span>Бюджет</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint and 'savings' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('savings_list') }}">
+                        <i class="bi bi-safe"></i><span>Накопления</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint and 'debt' in request.endpoint %}active{% endif %}"
+                       href="{{ url_for('debts_list') }}">
+                        <i class="bi bi-arrow-left-right"></i><span>Долги</span>
+                    </a>
+                </li>
+                <li class="nav-item ms-2 dropdown">
+                    <button class="btn btn-sm px-3 text-white pulse-btn dropdown-toggle"
+                            style="background:rgba(255,255,255,.2);border-radius:10px;border:none"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-plus-lg me-1"></i>Добавить
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                                <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('savings_new') }}">
+                                <i class="bi bi-safe text-primary me-2"></i>Накопление
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#addDebtModalNav">
+                                <i class="bi bi-arrow-left-right text-warning me-2"></i>Долг
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                <li class="nav-item ms-2 dropdown">
+                    <a class="nav-link dropdown-toggle text-white d-flex align-items-center gap-2"
+                       href="#" data-bs-toggle="dropdown">
+                        <span class="position-relative">
+                            <span class="rounded-circle bg-white text-primary fw-bold d-inline-flex
+                                         align-items-center justify-content-center"
+                                  style="width:28px;height:28px;font-size:{% if current_user.avatar %}1rem{% else %}.8rem{% endif %}">
+                                {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                            </span>
+                            {% if pending_invitations_count %}
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark"
+                                  style="font-size:.55rem;min-width:14px;padding:2px 4px">
+                                {{ pending_invitations_count }}
+                            </span>
+                            {% endif %}
+                        </span>
+                        {{ current_user.username }}
+                        {% if current_user.is_admin %}
+                            <span class="badge bg-danger" style="font-size:.65rem">admin</span>
+                        {% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('profile') }}">
+                                <i class="bi bi-person me-2"></i>Личный кабинет
+                            </a>
+                        </li>
+                        {% if current_user.is_admin %}
+                        <li>
+                            <a class="dropdown-item text-danger" href="{{ url_for('admin_panel') }}">
+                                <i class="bi bi-shield-lock me-2"></i>Администрирование
+                            </a>
+                        </li>
+                        {% endif %}
+                        {% if pending_invitations %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <span class="dropdown-item-text small text-muted px-3 py-1">
+                                <i class="bi bi-envelope me-1"></i>Приглашения
+                            </span>
+                        </li>
+                        {% for inv in pending_invitations %}
+                        <li>
+                            <div class="px-3 py-2 border-bottom" style="min-width:240px">
+                                <div class="fw-semibold small mb-1">{{ inv.shared_account.name }}</div>
+                                <div class="text-muted" style="font-size:.75rem">
+                                    от {{ inv.invited_by.username }}
+                                </div>
+                                <div class="d-flex gap-2 mt-2">
+                                    <form method="post" action="{{ url_for('invitation_accept', inv_id=inv.id) }}" class="m-0">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-success btn-sm py-0 px-2" style="font-size:.75rem">
+                                            <i class="bi bi-check2"></i> Принять
+                                        </button>
+                                    </form>
+                                    <form method="post" action="{{ url_for('invitation_decline', inv_id=inv.id) }}" class="m-0">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:.75rem">
+                                            Отклонить
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </li>
+                        {% endfor %}
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item {% if not active_shared_account %}fw-bold{% endif %}"
+                               href="{{ url_for('shared_switch_personal') }}">
+                                <i class="bi bi-person me-1"></i> Личный счёт
+                                {% if not active_shared_account %}<i class="bi bi-check2 ms-1 text-success"></i>{% endif %}
+                            </a>
+                        </li>
+                        {% for sa in user_shared_accounts %}
+                        <li>
+                            <a class="dropdown-item {% if active_shared_account and active_shared_account.id == sa.id %}fw-bold{% endif %}"
+                               href="{{ url_for('shared_switch', shared_id=sa.id) }}">
+                                <i class="bi bi-people me-1"></i> {{ sa.name }}
+                                {% if active_shared_account and active_shared_account.id == sa.id %}
+                                <i class="bi bi-check2 ms-1 text-success"></i>
+                                {% endif %}
+                            </a>
+                        </li>
+                        {% endfor %}
+                        <li>
+                            <a class="dropdown-item text-primary" href="{{ url_for('shared_create') }}">
+                                <i class="bi bi-plus-circle me-1"></i> Создать общий счёт
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right me-2"></i>Выйти
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                {% endif %}
+                {% if current_user.is_authenticated %}
+                <li class="nav-item ms-1">
+                    <button class="btn btn-sm btn-outline-light" id="help-toggle" title="Инструкция"
+                            onclick="openHelp()">
+                        <i class="bi bi-question-lg"></i>
+                    </button>
+                </li>
+                {% endif %}
+                <li class="nav-item ms-1 dropdown">
+                    <button class="btn btn-sm btn-outline-light" id="sound-toggle"
+                            data-bs-toggle="dropdown" title="Стиль звука">
+                        <i class="bi bi-volume-up-fill" id="sound-icon"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:170px">
+                        <li><span class="dropdown-header" style="font-size:.72rem">Стиль звука</span></li>
+                        <li><button class="dropdown-item sound-style-btn" data-style="neutral">
+                            <i class="bi bi-soundwave me-2 text-secondary"></i>Нейтральный
+                        </button></li>
+                        <li><button class="dropdown-item sound-style-btn" data-style="soft">
+                            <i class="bi bi-soundwave me-2 text-info"></i>Мягкий
+                        </button></li>
+                        <li><button class="dropdown-item sound-style-btn" data-style="retro">
+                            <i class="bi bi-soundwave me-2 text-warning"></i>Ретро
+                        </button></li>
+                        <li><button class="dropdown-item sound-style-btn" data-style="chime">
+                            <i class="bi bi-soundwave me-2 text-success"></i>Колокольчик
+                        </button></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><button class="dropdown-item sound-style-btn" data-style="off">
+                            <i class="bi bi-volume-mute me-2 text-danger"></i>Выключить
+                        </button></li>
+                    </ul>
+                </li>
+                <li class="nav-item ms-1">
+                    <button class="btn btn-sm btn-outline-light" id="theme-toggle" title="Сменить тему">
+                        <i class="bi bi-moon-fill" id="theme-icon"></i>
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+{% if current_user.is_authenticated and active_shared_account %}
+<div id="shared-banner" class="shared-banner">
+    <i class="bi bi-people-fill" style="flex-shrink:0;opacity:.75"></i>
+    <a href="{{ url_for('shared_manage', shared_id=active_shared_account.id) }}"
+       class="banner-name" aria-label="Управление общим счётом {{ active_shared_account.name }}">
+        {{ active_shared_account.name }}
+    </a>
+    <span class="banner-type-badge"><i class="bi bi-people-fill"></i> совм.</span>
+    <a href="{{ url_for('shared_switch_personal') }}" class="banner-pill">
+        <i class="bi bi-person"></i> Личный
+    </a>
+    <a href="{{ url_for('shared_switch_personal') }}" class="banner-close"
+       aria-label="Выйти из совместного режима">×</a>
+</div>
+{% endif %}
+
+<!-- ═══════════════════════════════════════════
+     КОНТЕНТ
+════════════════════════════════════════════ -->
+<div class="container my-4 page-wrapper">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+            <div class="alert alert-{{ cat }} alert-dismissible fade show stagger-item js-auto-dismiss" role="alert">
+                {{ msg }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endwith %}
+    <script>
+    document.querySelectorAll('.js-auto-dismiss').forEach(function(el) {
+        setTimeout(function() {
+            el.style.transition = 'opacity .8s ease, margin .8s ease, padding .8s ease, max-height .8s ease';
+            el.style.opacity = '0';
+            el.style.maxHeight = el.offsetHeight + 'px';
+            setTimeout(function() {
+                el.style.maxHeight = '0';
+                el.style.margin = '0';
+                el.style.padding = '0';
+                el.style.overflow = 'hidden';
+            }, 800);
+            setTimeout(function() { el.remove(); }, 1600);
+        }, 10000);
+    });
+    </script>
+
+    {% block content %}{% endblock %}
+</div>
+
+<!-- ═══════════════════════════════════════════
+     НИЖНЯЯ НАВИГАЦИЯ (только мобильный)
+════════════════════════════════════════════ -->
+{% if current_user.is_authenticated %}
+<nav class="bottom-nav">
+    <a href="{{ url_for('index', year=nav_year, month=nav_month) }}"
+       class="{% if request.endpoint == 'index' %}active{% endif %}">
+        <i class="bi bi-house"></i>
+        <span>Обзор</span>
+    </a>
+    <a href="{{ url_for('expenses_list', year=nav_year, month=nav_month) }}"
+       class="{% if 'expenses' in request.endpoint %}active{% endif %}">
+        <i class="bi bi-list-ul"></i>
+        <span>Расходы</span>
+    </a>
+    <div class="dropup">
+        <button class="add-btn" data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+        <ul class="dropdown-menu mb-2" style="min-width:160px;left:50%;transform:translateX(-50%)">
+            <li>
+                <a class="dropdown-item" href="{{ url_for('expense_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-up-circle text-danger me-2"></i>Расход
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item" href="{{ url_for('income_add', ret_year=nav_year, ret_month=nav_month) }}">
+                    <i class="bi bi-arrow-down-circle text-success me-2"></i>Доход
+                </a>
+            </li>
+            <li><hr class="dropdown-divider"></li>
+            <li>
+                <a class="dropdown-item" href="{{ url_for('savings_new') }}">
+                    <i class="bi bi-safe text-primary me-2"></i>Накопление
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#addDebtModalNav">
+                    <i class="bi bi-arrow-left-right text-warning me-2"></i>Долг
+                </a>
+            </li>
+        </ul>
+    </div>
+    <a href="{{ url_for('income_list', year=nav_year, month=nav_month) }}"
+       class="{% if 'income' in request.endpoint %}active{% endif %}">
+        <i class="bi bi-arrow-down-circle"></i>
+        <span>Доходы</span>
+    </a>
+    <div class="dropup bottom-more-dropup">
+        <button class="bottom-more-btn {% if request.endpoint in ('budget', 'savings_list', 'debts_list') or (request.endpoint and 'savings' in request.endpoint) or (request.endpoint and 'debt' in request.endpoint) %}active{% endif %}"
+                data-bs-toggle="dropdown" aria-expanded="false">
+            <i class="bi bi-grid-3x3-gap"></i>
+            <span>Ещё</span>
+        </button>
+        <ul class="dropdown-menu mb-2 bottom-more-menu">
+            <li>
+                <a class="dropdown-item {% if request.endpoint == 'budget' %}fw-semibold text-primary{% endif %}"
+                   href="{{ url_for('budget', year=nav_year, month=nav_month) }}">
+                    <i class="bi bi-piggy-bank me-2 text-primary"></i>Бюджет
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item {% if request.endpoint and 'savings' in request.endpoint %}fw-semibold text-primary{% endif %}"
+                   href="{{ url_for('savings_list') }}">
+                    <i class="bi bi-safe me-2 text-primary"></i>Накопления
+                </a>
+            </li>
+            <li>
+                <a class="dropdown-item {% if request.endpoint and 'debt' in request.endpoint %}fw-semibold text-primary{% endif %}"
+                   href="{{ url_for('debts_list') }}">
+                    <i class="bi bi-arrow-left-right me-2 text-primary"></i>Долги
+                </a>
+            </li>
+        </ul>
+    </div>
+</nav>
+{% endif %}
+
+{% block modals %}{% endblock %}
+
+{% if current_user.is_authenticated %}
+<!-- Глобальный модал добавления долга (из кнопки «+ Добавить») -->
+<div class="modal fade" id="addDebtModalNav" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-arrow-left-right text-warning me-1"></i>Новый долг
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{{ url_for('debt_add') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body pt-0">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Имя *</label>
+                        <input type="text" name="person_name" class="form-control"
+                               required maxlength="100" placeholder="Имя человека">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Сумма *</label>
+                        <div class="input-group">
+                            <input type="text" name="amount" class="form-control fmt-amount"
+                                   inputmode="decimal" required placeholder="0.00">
+                            <span class="input-group-text">₽</span>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Направление</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="direction" value="owe" id="navDirOwe" checked>
+                                <label class="form-check-label" for="navDirOwe">Я должен</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="direction" value="owed" id="navDirOwed">
+                                <label class="form-check-label" for="navDirOwed">Мне должны</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                            data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn grad-primary btn-sm">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated %}
+<!-- ═══ Инструкция ════════════════════════════════════════════════════ -->
+<div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <div>
+                    <h5 class="modal-title fw-bold" id="helpModalLabel">
+                        <i class="bi bi-map text-primary me-2"></i>Как пользоваться трекером
+                    </h5>
+                    <div class="text-muted small">Быстрый обзор всех возможностей</div>
+                </div>
+                <button type="button" class="btn-close ms-3" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-3">
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#0d6efd22;color:#0d6efd">
+                                <i class="bi bi-bar-chart-line-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Обзор</div>
+                                <div class="text-muted small">Главная страница — баланс месяца (доходы минус расходы), разбивка по категориям, диаграмма и статистика за 3 месяца. Переключайте месяц фильтром вверху.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#dc354522;color:#dc3545">
+                                <i class="bi bi-list-ul"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Расходы</div>
+                                <div class="text-muted small">Добавляйте расходы через «+ Добавить». Отмечайте оплаченные — только они учитываются в балансе. Копируйте повторяющиеся на другие месяцы.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#19875422;color:#198754">
+                                <i class="bi bi-arrow-down-circle-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Доходы</div>
+                                <div class="text-muted small">Фиксируйте все поступления: зарплата, фриланс, подработки. Они участвуют в расчёте баланса и дневного бюджета.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#6610f222;color:#6610f2">
+                                <i class="bi bi-piggy-bank-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Бюджет</div>
+                                <div class="text-muted small">Задайте лимиты по категориям на месяц. На главной странице прогресс-бар покажет, сколько осталось в каждой категории.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#0dcaf022;color:#0dcaf0">
+                                <i class="bi bi-safe-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Накопления</div>
+                                <div class="text-muted small">Создавайте счета с целью (отпуск, машина…). Пополнение уменьшает доступный баланс месяца. Снятие — возвращает. История — на странице «Накопления».</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#dc354522;color:#dc3545">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Долги</div>
+                                <div class="text-muted small">Отслеживайте кому должны вы и кто должен вам. Нажмите «Погасить» когда долг закрыт — он перейдёт в архив. ИИ-помощник умеет добавлять и отмечать долги по команде.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#fd7e1422;color:#fd7e14">
+                                <i class="bi bi-calendar-check-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Дневной бюджет</div>
+                                <div class="text-muted small">Нажмите на карточку «Можно тратить в день» и укажите даты аванса и зарплаты. Трекер посчитает, сколько тратить ежедневно до ближайшей выплаты.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#20c99722;color:#20c997">
+                                <i class="bi bi-copy"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Копирование данных</div>
+                                <div class="text-muted small">В начале нового месяца появится кнопка «Скопировать данные с прошлого месяца» — она перенесёт плановые расходы и доходы.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#ffc10722;color:#ffc107">
+                                <i class="bi bi-file-earmark-excel-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Экспорт / Импорт</div>
+                                <div class="text-muted small">В «Личном кабинете» скачайте все данные в Excel или загрузите из файла. Удобно для переноса данных или резервной копии.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="help-card">
+                            <div class="help-card-icon" style="background:#6366f122;color:#6366f1">
+                                <i class="bi bi-people-fill"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold">Совместный счёт</div>
+                                <div class="text-muted small">
+                                    Создайте общий счёт и пригласите партнёра — все расходы и доходы в этом режиме видны обоим участникам.
+                                    <br>
+                                    Переключиться можно через меню профиля (аватар справа вверху) → название счёта. Активный режим отображается в цветной полоске под навигацией.
+                                    <br><br>
+                                    <strong>Личный счёт</strong> — ваши личные трата и доходы (одежда, хобби, зарплата).
+                                    <br>
+                                    <strong>Совместный счёт</strong> — общие расходы и доходы (аренда, продукты, коммуналка, совместные поездки).
+                                    <br><br>
+                                    ИИ-помощник автоматически определяет, в какой счёт записывать: в текущем режиме он пишет туда по умолчанию. Если нужно записать в другой — скажите «в личный» или «в общий».
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="alert alert-primary d-flex gap-2 mt-3 mb-0 py-2 px-3" style="font-size:.85rem">
+                    <i class="bi bi-lightbulb-fill flex-shrink-0 mt-1"></i>
+                    <span>Категории, цвета и иконки настраиваются прямо при добавлении расхода — нажмите «+ Новая категория» в форме.</span>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-1 justify-content-between">
+                <label class="d-flex align-items-center gap-2 text-muted small" style="cursor:pointer">
+                    <input type="checkbox" id="helpDontShow" onchange="toggleDontShow(this)">
+                    Больше не показывать
+                </label>
+                <button type="button" class="btn grad-primary btn-sm px-4"
+                        data-bs-dismiss="modal">Понятно!</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.help-card {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--bs-tertiary-bg);
+    height: 100%;
+}
+.help-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+</style>
+
+<script>
+function openHelp() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('helpModal')).show();
+}
+
+function toggleDontShow(cb) {
+    localStorage.setItem('helpDontShow', cb.checked ? '1' : '0');
+}
+
+// Автопоказ для новых пользователей
+(function () {
+    if (localStorage.getItem('helpDontShow') === '1') return;
+    if (localStorage.getItem('helpSeen')) return;
+    localStorage.setItem('helpSeen', '1');
+    window.addEventListener('DOMContentLoaded', function () {
+        setTimeout(() => {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('helpModal')).show();
+        }, 800);
+    });
+})();
+</script>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/animations.js') }}"></script>
+{% block scripts %}{% endblock %}
+<script>
+    // Применяем тему ко всем кнопкам-переключателям
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('theme', theme);
+        document.querySelectorAll('.theme-icon').forEach(el => {
+            el.className = 'bi ' + (theme === 'dark' ? 'bi-sun-fill' : 'bi-moon-fill') + ' theme-icon';
+        });
+    }
+
+    // Инициализация
+    applyTheme(localStorage.getItem('theme') || 'light');
+
+    // Вешаем обработчик на все кнопки смены темы
+    document.querySelectorAll('#theme-toggle, #theme-toggle-mobile').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.style.transition = 'transform 0.35s ease';
+                icon.style.transform  = 'rotate(360deg)';
+                setTimeout(() => { icon.style.transform = ''; }, 350);
+            }
+            const next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+            if (document.startViewTransition) {
+                document.startViewTransition(() => applyTheme(next));
+            } else {
+                applyTheme(next);
+            }
+        });
+    });
+
+    // Обновляем классы иконок (теперь через общий класс)
+    document.querySelectorAll('#theme-toggle i, #theme-toggle-mobile i').forEach(el => {
+        el.classList.add('theme-icon');
+    });
+    applyTheme(localStorage.getItem('theme') || 'light');
+
+    // Стиль звука из localStorage
+    (function () {
+        var icon = document.getElementById('sound-icon');
+        function updateIcon() {
+            var s = localStorage.getItem('soundStyle') || 'neutral';
+            icon.className = s === 'off' ? 'bi bi-volume-mute-fill' : 'bi bi-volume-up-fill';
+            document.getElementById('sound-toggle').style.opacity = s === 'off' ? '0.5' : '1';
+            document.querySelectorAll('.sound-style-btn').forEach(function(b) {
+                b.classList.toggle('active', b.dataset.style === s);
+            });
+        }
+        updateIcon();
+        document.querySelectorAll('.sound-style-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                localStorage.setItem('soundStyle', btn.dataset.style);
+                updateIcon();
+                // Проигрываем превью при выборе
+                if (btn.dataset.style !== 'off') window._playSound && window._playSound('default');
+            });
+        });
+    })();
+
+    // Закрывать dropdown при скролле (мобильный) — с анимацией
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.dropdown-menu.show:not(.hiding)').forEach(menu => {
+            const toggle = menu.closest('.dropdown, .dropup')?.querySelector('[data-bs-toggle="dropdown"]');
+            if (!toggle) return;
+            menu.classList.add('hiding');
+            setTimeout(() => {
+                menu.classList.remove('hiding');
+                bootstrap.Dropdown.getInstance(toggle)?.hide();
+            }, 180);
+        });
+    }, { passive: true });
+
+    // ── Звуковая система ─────────────────────────────────────────
+    (function () {
+        var _ctx = null;
+
+        function getCtx() {
+            if (!_ctx) _ctx = new (window.AudioContext || window.webkitAudioContext)();
+            if (_ctx.state === 'suspended') _ctx.resume();
+            return _ctx;
+        }
+
+        // Держим AudioContext живым — периодически тихий буфер
+        var _keepAlive = null;
+        function startKeepAlive(ctx) {
+            if (_keepAlive) return;
+            _keepAlive = setInterval(function() {
+                if (ctx.state === 'suspended') ctx.resume();
+                try {
+                    var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+                    var src = ctx.createBufferSource();
+                    src.buffer = buf; src.connect(ctx.destination); src.start();
+                } catch(e) {}
+            }, 5000);
+        }
+        document.addEventListener('pointerdown', function() {
+            var ctx = getCtx(); startKeepAlive(ctx);
+        }, { once: true, passive: true });
+
+        var STYLES = {
+            neutral: function(ctx, t) {
+                var o = ctx.createOscillator(), g = ctx.createGain();
+                o.connect(g); g.connect(ctx.destination);
+                o.type = 'sine';
+                o.frequency.setValueAtTime(1050, t);
+                o.frequency.exponentialRampToValueAtTime(650, t + 0.05);
+                g.gain.setValueAtTime(0.12, t);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+                o.start(t); o.stop(t + 0.06);
+            },
+            soft: function(ctx, t) {
+                var o = ctx.createOscillator(), g = ctx.createGain();
+                o.connect(g); g.connect(ctx.destination);
+                o.type = 'triangle';
+                o.frequency.setValueAtTime(520, t);
+                o.frequency.exponentialRampToValueAtTime(360, t + 0.07);
+                g.gain.setValueAtTime(0.1, t);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+                o.start(t); o.stop(t + 0.08);
+            },
+            retro: function(ctx, t) {
+                var o = ctx.createOscillator(), g = ctx.createGain();
+                o.connect(g); g.connect(ctx.destination);
+                o.type = 'square';
+                o.frequency.setValueAtTime(440, t);
+                o.frequency.exponentialRampToValueAtTime(300, t + 0.09);
+                g.gain.setValueAtTime(0.06, t);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+                o.start(t); o.stop(t + 0.1);
+            },
+            chime: function(ctx, t) {
+                [[1500, 0.09], [2250, 0.05]].forEach(function(p) {
+                    var o = ctx.createOscillator(), g = ctx.createGain();
+                    o.connect(g); g.connect(ctx.destination);
+                    o.type = 'sine';
+                    o.frequency.setValueAtTime(p[0], t);
+                    g.gain.setValueAtTime(p[1], t);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+                    o.start(t); o.stop(t + 0.08);
+                });
+            }
+        };
+
+        function playSound() {
+            var style = localStorage.getItem('soundStyle') || 'neutral';
+            if (style === 'off') return;
+            try {
+                var ctx = getCtx();
+                if (ctx.state === 'suspended') ctx.resume();
+                var t = ctx.currentTime;
+                (STYLES[style] || STYLES.neutral)(ctx, t);
+            } catch(e) {}
+        }
+
+        window._playSound = playSound;
+
+        // Слушаем клики на ВСЕ интерактивные элементы
+        // capture:true — слышит клик до stopPropagation в дочерних обработчиках
+        document.addEventListener('click', function(e) {
+            var style = localStorage.getItem('soundStyle') || 'neutral';
+            if (style === 'off') return;
+
+            var el = e.target.closest(
+                'button, a, [role="button"], [role="link"], [data-href], ' +
+                '.savings-dash-card, .debt-dash-card, .float-card, .record-card, ' +
+                '.month-pill, [data-year]'
+            );
+            if (!el) return;
+            if (el.hasAttribute('disabled') || el.classList.contains('disabled')) return;
+            if (el.classList.contains('sound-style-btn')) return;
+
+            playSound();
+        }, { capture: true, passive: true });
+    })();
+
+    // Плавные переходы между страницами
+    if (document.startViewTransition) {
+        document.addEventListener('click', e => {
+            const a = e.target.closest('a[href]');
+            if (!a) return;
+            const url = a.getAttribute('href');
+            if (!url || url.startsWith('#') || url.startsWith('http') || a.target === '_blank') return;
+            e.preventDefault();
+            document.startViewTransition(() => { window.location.href = url; });
+        });
+    }
+</script>
+
+{% if reminders %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  {% for exp in reminders %}
+  <div class="toast" id="reminder-toast-{{ exp.id }}" role="alert" data-bs-autohide="true" data-bs-delay="8000">
+    <div class="toast-header">
+      <strong class="me-auto"><i class="bi bi-bell me-1"></i>Завтра расход</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Закрыть"></button>
+    </div>
+    <div class="toast-body">
+      {{ exp.description or exp.category.name }} — <strong>{{ exp.amount|float|fmt_rub(0) }} ₽</strong>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<script>
+document.querySelectorAll('.toast[id^="reminder-toast-"]').forEach(function(el) {
+    var key = 'shown_' + el.id;
+    if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        new bootstrap.Toast(el).show();
+    }
+});
+</script>
+{% endif %}
+{% if budget_alerts %}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:1100">
+  <div class="toast" id="budget-alert-toast" role="alert" data-bs-autohide="true" data-bs-delay="8000">
+    <div class="toast-header">
+      <strong class="me-auto"><i class="bi bi-wallet2 me-1"></i>Бюджет</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Закрыть"></button>
+    </div>
+    <div class="toast-body">
+      {% for a in budget_alerts %}
+      <div>
+        {% if a.level == 'exceeded' %}<i class="bi bi-x-circle-fill text-danger"></i>{% else %}<i class="bi bi-exclamation-triangle-fill text-warning"></i>{% endif %}
+        <strong>{{ a.name }}</strong> —
+        {% if a.level == 'exceeded' %}превышен{% else %}{{ a.pct }}% бюджета{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+    var t = document.getElementById('budget-alert-toast');
+    if (t && !sessionStorage.getItem('budget_toast_shown')) {
+        sessionStorage.setItem('budget_toast_shown', '1');
+        new bootstrap.Toast(t).show();
+    }
+})();
+</script>
+{% endif %}
+{% if current_user.is_authenticated %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endif %}
+<script>
+/* ── Форматирование суммы при вводе (10 000 вместо 10000) ─── */
+(function () {
+    function fmtAmountInput(input) {
+        var raw = input.value.replace(/\s/g, '').replace(',', '.');
+        if (!raw || isNaN(raw)) return;
+        var parts = raw.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        var caret = input.selectionStart;
+        var oldLen = input.value.length;
+        input.value = parts.join('.');
+        var newLen = input.value.length;
+        try { input.setSelectionRange(caret + (newLen - oldLen), caret + (newLen - oldLen)); } catch(e) {}
+    }
+
+    function getRawValue(input) {
+        return input.value.replace(/ |\s/g, '').replace(',', '.');
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.fmt-amount').forEach(function (input) {
+            input.addEventListener('input', function () { fmtAmountInput(this); });
+            input.closest('form') && input.closest('form').addEventListener('submit', function () {
+                input.value = getRawValue(input);
+            }, { once: false });
+        });
+
+        // Для модалов которые открываются позже
+        document.addEventListener('shown.bs.modal', function (e) {
+            e.target.querySelectorAll('.fmt-amount').forEach(function (input) {
+                input.addEventListener('input', function () { fmtAmountInput(this); });
+            });
+        });
+    });
+})();
+</script>
+<script>
+// Скрываем чат-кнопку когда открыто меню «Ещё»
+document.addEventListener('DOMContentLoaded', function () {
+    var moreDropup = document.querySelector('.bottom-more-dropup');
+    var chatToggle = document.getElementById('chat-toggle');
+    if (moreDropup && chatToggle) {
+        moreDropup.addEventListener('show.bs.dropdown', function () {
+            chatToggle.style.opacity = '0';
+            chatToggle.style.pointerEvents = 'none';
+        });
+        moreDropup.addEventListener('hide.bs.dropdown', function () {
+            chatToggle.style.opacity = '';
+            chatToggle.style.pointerEvents = '';
+        });
+    }
+});
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/static/sw.js');
+    });
+}
+</script>
+</body>
+</html>

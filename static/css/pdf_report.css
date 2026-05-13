@@ -1,0 +1,78 @@
+@page {
+    size: A4;
+    margin: 15mm 20mm;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 10pt;
+    color: #1a1a2e;
+}
+
+.page { width: 100%; }
+
+/* Header */
+.report-header {
+    background: linear-gradient(135deg, #4361ee, #e8115b);
+    color: #fff;
+    padding: 8mm 10mm;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 4mm;
+    margin-bottom: 6mm;
+}
+.app-name     { font-size: 14pt; font-weight: 700; letter-spacing: 0.5pt; }
+.report-title { font-size: 11pt; opacity: 0.9; }
+
+/* Summary cards */
+.summary-row {
+    display: flex;
+    gap: 4mm;
+    margin-bottom: 6mm;
+}
+.card {
+    flex: 1;
+    border-radius: 3mm;
+    padding: 4mm 5mm;
+    text-align: center;
+}
+.card-income  { background: #e8f5e9; }
+.card-expense { background: #fce4ec; }
+.card-balance { background: #e3f2fd; }
+.card-label { font-size: 8pt; color: #555; margin-bottom: 1mm; }
+.card-value { font-size: 14pt; font-weight: 700; }
+.card-income  .card-value { color: #2e7d32; }
+.card-expense .card-value { color: #c62828; }
+.card-balance .card-value { color: #1565c0; }
+
+/* Chart + table */
+.chart-row {
+    display: flex;
+    gap: 6mm;
+    align-items: flex-start;
+    margin-bottom: 6mm;
+}
+.chart-col { width: 55mm; flex-shrink: 0; }
+.chart-col svg { width: 100%; height: auto; }
+.table-col { flex: 1; }
+
+/* Category table */
+.cat-table { width: 100%; border-collapse: collapse; }
+.cat-table tr { border-bottom: 0.3mm solid #e9ecef; }
+.cat-table td { padding: 1.5mm 2mm; font-size: 9pt; vertical-align: middle; }
+.dot-cell { width: 5mm; }
+.dot { display: inline-block; width: 3mm; height: 3mm; border-radius: 50%; }
+.pct-cell { text-align: right; color: #666; width: 14mm; }
+.amt-cell { text-align: right; font-weight: 600; width: 22mm; }
+
+/* Footer */
+.report-footer {
+    border-top: 0.3mm solid #dee2e6;
+    padding-top: 3mm;
+    font-size: 7pt;
+    color: #888;
+    text-align: center;
+}

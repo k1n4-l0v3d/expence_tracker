@@ -1,0 +1,28 @@
+{% if user.role != 'admin' %}
+<div class="d-flex gap-1 justify-content-end">
+    <button class="btn btn-sm btn-outline-warning"
+            data-bs-toggle="modal" data-bs-target="#warnModal{{ user.id }}" title="Предупреждение">
+        <i class="bi bi-exclamation-triangle"></i>
+    </button>
+    {% if user.status == 'banned' %}
+    <form method="post" action="{{ url_for('admin_unban', user_id=user.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-success" title="Разблокировать">
+            <i class="bi bi-unlock"></i>
+        </button>
+    </form>
+    {% else %}
+    <button class="btn btn-sm btn-outline-danger"
+            data-bs-toggle="modal" data-bs-target="#banModal{{ user.id }}" title="Заблокировать">
+        <i class="bi bi-slash-circle"></i>
+    </button>
+    {% endif %}
+    <form method="post" action="{{ url_for('admin_delete_user', user_id=user.id) }}"
+          onsubmit="return confirm('Удалить {{ user.username }} и все его данные?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-secondary" title="Удалить аккаунт">
+            <i class="bi bi-trash"></i>
+        </button>
+    </form>
+</div>
+{% endif %}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pdf_report.css') }}">
+</head>
+<body>
+  <div class="page">
+
+    <header class="report-header">
+      <span class="app-name">Подсчитай!</span>
+      <span class="report-title">{{ username }} • {{ month_name }} {{ year }}</span>
+    </header>
+
+    <div class="summary-row">
+      <div class="card card-income">
+        <div class="card-label">Доходы</div>
+        <div class="card-value">{{ "%.0f"|format(income) }} ₽</div>
+      </div>
+      <div class="card card-expense">
+        <div class="card-label">Расходы</div>
+        <div class="card-value">{{ "%.0f"|format(expenses) }} ₽</div>
+      </div>
+      <div class="card card-balance">
+        <div class="card-label">Остаток</div>
+        <div class="card-value">{{ "%.0f"|format(balance) }} ₽</div>
+      </div>
+    </div>
+
+    <div class="chart-row">
+      <div class="chart-col">{{ svg_chart|safe }}</div>
+      <div class="table-col">
+        <table class="cat-table">
+          {% for cat in categories %}
+          <tr>
+            <td class="dot-cell"><span class="dot" style="background:{{ cat.color }}"></span></td>
+            <td class="name-cell">{{ cat.name }}</td>
+            <td class="pct-cell">{{ "%.1f"|format(cat.pct) }}%</td>
+            <td class="amt-cell">{{ "%.0f"|format(cat.total) }} ₽</td>
+          </tr>
+          {% endfor %}
+          {% if not categories %}
+          <tr>
+            <td colspan="4" style="text-align:center;color:#888;padding:4mm">
+              Расходов нет
+            </td>
+          </tr>
+          {% endif %}
+        </table>
+      </div>
+    </div>
+
+    <footer class="report-footer">
+      Сгенерировано {{ generated }}
+    </footer>
+
+  </div>
+</body>
+</html>

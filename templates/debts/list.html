@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+{% block title %}Долги{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-arrow-left-right text-primary me-2"></i>Долги</h4>
+    <button type="button" class="btn grad-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addDebtModal">
+        <i class="bi bi-plus-lg me-1"></i>Добавить
+    </button>
+</div>
+
+{% if total_owe > 0 or total_owed > 0 %}
+<div class="row g-3 mb-4">
+    {% if total_owe > 0 %}
+    <div class="col-sm-6">
+        <div class="card border-0 shadow-sm h-100" style="background:#fff1f2">
+            <div class="card-body text-center py-3">
+                <div class="small text-muted mb-1">Я должен</div>
+                <div class="fw-bold fs-4 text-danger">{{ total_owe|fmt_rub }} ₽</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% if total_owed > 0 %}
+    <div class="col-sm-6">
+        <div class="card border-0 shadow-sm h-100" style="background:#f0fdf4">
+            <div class="card-body text-center py-3">
+                <div class="small text-muted mb-1">Мне должны</div>
+                <div class="fw-bold fs-4 text-success">{{ total_owed|fmt_rub }} ₽</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Фильтр -->
+<div class="d-flex gap-2 mb-3 flex-wrap">
+    {% for key, label in [('active','Активные'),('owe','Я должен'),('owed','Мне должны'),('paid','Погашены')] %}
+    <a href="?filter={{ key }}"
+       class="btn btn-sm {% if filter_val == key %}grad-primary{% else %}btn-outline-secondary{% endif %}">
+        {{ label }}
+    </a>
+    {% endfor %}
+</div>
+
+<div>
+{% for debt in debts %}
+<div class="record-card stagger-item d-flex justify-content-between align-items-center gap-2
+    {% if debt.is_paid %}opacity-50{% endif %}">
+    <div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+            {% if debt.direction == 'owe' %}
+            <span class="badge" style="background:#dc3545">Я должен</span>
+            {% else %}
+            <span class="badge" style="background:#198754">Мне должны</span>
+            {% endif %}
+            {% if debt.is_paid %}
+            <span class="badge bg-secondary">Погашен</span>
+            {% endif %}
+        </div>
+        <div class="fw-semibold {% if debt.is_paid %}text-decoration-line-through{% endif %}">
+            {{ debt.person_name }}
+        </div>
+        <div class="text-muted small">{{ debt.created_at.strftime('%d.%m.%Y') }}</div>
+    </div>
+    <div class="text-end flex-shrink-0">
+        <div class="fw-bold fs-6
+            {% if debt.direction == 'owe' %}text-danger{% else %}text-success{% endif %}
+            {% if debt.is_paid %}text-decoration-line-through{% endif %}">
+            {{ debt.amount|fmt_rub }} ₽
+        </div>
+        <div class="d-flex gap-1 mt-1 justify-content-end">
+            <form method="post" action="{{ url_for('debt_toggle_paid', debt_id=debt.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm {% if debt.is_paid %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
+                        style="min-height:44px;padding:4px 8px"
+                        title="{% if debt.is_paid %}Вернуть{% else %}Погасить{% endif %}">
+                    <i class="bi {% if debt.is_paid %}bi-arrow-counterclockwise{% else %}bi-check-lg{% endif %}"></i>
+                </button>
+            </form>
+            <a href="{{ url_for('debt_edit', debt_id=debt.id) }}"
+               class="btn btn-sm btn-outline-secondary" style="min-height:44px;padding:4px 8px">
+                <i class="bi bi-pencil"></i>
+            </a>
+            <form method="post" action="{{ url_for('debt_delete', debt_id=debt.id) }}"
+                  class="d-inline debt-delete-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        style="min-height:44px;padding:4px 8px"
+                        onclick="openDebtDeleteModal(this.closest('form'), '{{ debt.person_name | e }}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="text-center py-5">
+    <div class="mb-3" style="font-size:3.5rem;opacity:.18;line-height:1">
+        <i class="bi bi-arrow-left-right"></i>
+    </div>
+    <div class="fw-semibold mb-1">
+        {% if filter_val == 'paid' %}Погашенных долгов нет
+        {% elif filter_val == 'owe' %}Нет активных долгов «Я должен»
+        {% elif filter_val == 'owed' %}Нет активных долгов «Мне должны»
+        {% else %}Долгов пока нет{% endif %}
+    </div>
+    <div class="text-muted small mb-4">
+        {% if filter_val in ('owe', 'owed', 'paid') %}
+            Попробуйте другой фильтр
+        {% else %}
+            Отслеживайте кому вы должны и кто должен вам
+        {% endif %}
+    </div>
+    {% if filter_val == 'active' %}
+    <button type="button" class="btn grad-primary btn-sm"
+            data-bs-toggle="modal" data-bs-target="#addDebtModal">
+        <i class="bi bi-plus-lg me-1"></i>Добавить первый долг
+    </button>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block modals %}
+<!-- Подтверждение удаления долга -->
+<div class="modal fade" id="deleteDebtModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-body text-center pt-4 pb-2">
+                <i class="bi bi-trash text-danger" style="font-size:2rem"></i>
+                <div class="fw-semibold mt-2">Удалить долг?</div>
+                <div id="deleteDebtName" class="text-muted small mt-1"></div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center gap-2 pb-4">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4"
+                        data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger btn-sm px-4"
+                        id="deleteDebtConfirmBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var _pendingDebtForm = null;
+
+function openDebtDeleteModal(form, personName) {
+    _pendingDebtForm = form;
+    document.getElementById('deleteDebtName').textContent = '«' + personName + '»';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteDebtModal')).show();
+}
+
+document.getElementById('deleteDebtConfirmBtn').addEventListener('click', function () {
+    if (!_pendingDebtForm) return;
+    bootstrap.Modal.getInstance(document.getElementById('deleteDebtModal'))?.hide();
+    _pendingDebtForm.submit();
+});
+</script>
+
+<div class="modal fade" id="addDebtModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h6 class="modal-title fw-semibold">
+                    <i class="bi bi-arrow-left-right text-primary me-1"></i>Новый долг
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{{ url_for('debt_add') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-body pt-0">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Имя *</label>
+                        <input type="text" name="person_name" class="form-control"
+                               required maxlength="100" placeholder="Имя человека">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Сумма *</label>
+                        <div class="input-group">
+                            <input type="text" name="amount" class="form-control fmt-amount"
+                                   inputmode="decimal" required placeholder="0.00">
+                            <span class="input-group-text">₽</span>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Направление</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="direction" value="owe" id="dirOwe" checked>
+                                <label class="form-check-label" for="dirOwe">Я должен</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       name="direction" value="owed" id="dirOwed">
+                                <label class="form-check-label" for="dirOwed">Мне должны</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                            data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn grad-primary btn-sm">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

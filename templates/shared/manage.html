@@ -1,0 +1,259 @@
+{% extends 'base.html' %}
+{% block title %}Совместный счёт{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+{% if account is none %}
+  <h2 class="mb-4">Создать совместный счёт</h2>
+  <div class="card shadow-sm" style="max-width:480px">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('shared_create') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Название счёта</label>
+          <input type="text" name="name" class="form-control"
+                 placeholder="Семейный бюджет" maxlength="100" required autofocus>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Создать</button>
+      </form>
+    </div>
+  </div>
+{% else %}
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">{{ account.name }}</h2>
+    <form method="post" action="{{ url_for('shared_leave', shared_id=account.id) }}"
+          onsubmit="return confirm('Покинуть счёт?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Покинуть счёт</button>
+    </form>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-md-6">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold">Участники ({{ members|length }})</div>
+        <ul class="list-group list-group-flush">
+          {% for m in members %}
+          <li class="list-group-item d-flex align-items-center gap-2">
+            <span class="fs-4">{{ m.user.avatar or '👤' }}</span>
+            <div>
+              <div class="fw-semibold">{{ m.user.username }}</div>
+              <small class="text-muted">с {{ m.joined_at.strftime('%d.%m.%Y') }}</small>
+            </div>
+            {% if m.user_id == account.created_by_user_id %}
+            <span class="badge bg-primary ms-auto">создатель</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+          {% for inv in invitations %}
+          <li class="list-group-item d-flex align-items-center gap-2 opacity-75">
+            <span class="fs-4">{{ inv.invited_user.avatar or '👤' }}</span>
+            <div>
+              <div class="fw-semibold">{{ inv.invited_user.username }}</div>
+              <small class="text-muted">приглашён {{ inv.created_at.strftime('%d.%m.%Y') }}</small>
+            </div>
+            <span class="badge bg-warning text-dark ms-auto">ожидает</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold">Пригласить участника</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('shared_invite', shared_id=account.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <label class="form-label">Логин или email</label>
+              <input type="text" name="identifier" class="form-control"
+                     placeholder="username или email@example.com" required>
+            </div>
+            <button type="submit" class="btn btn-success w-100">Пригласить</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {# ── Чат ────────────────────────────────────────────────────── #}
+  <div class="col-12 mt-2">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold d-flex align-items-center gap-2">
+        <i class="bi bi-chat-dots-fill text-primary"></i> Чат
+      </div>
+      <div class="card-body p-0">
+        <div id="chatMessages"
+             style="height:350px;overflow-y:auto;padding:1rem;scroll-behavior:smooth">
+          <div class="text-center text-muted small py-5" id="chatEmpty">
+            <i class="bi bi-chat-dots opacity-25" style="font-size:2rem"></i>
+            <div class="mt-2">Нет сообщений. Напишите первым!</div>
+          </div>
+        </div>
+        <div class="border-top d-flex gap-2 p-2">
+          <input type="text" id="chatInput" class="form-control"
+                 placeholder="Написать сообщение..." maxlength="1000"
+                 autocomplete="off">
+          <button class="btn btn-primary px-3" id="chatSend" title="Отправить">
+            <i class="bi bi-send-fill"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+{% endif %}
+
+</div>
+
+<script>
+(function () {
+    const SHARED_ID  = {{ account.id if account else 0 }};
+    const CSRF_TOKEN = {{ csrf_token() | tojson }};
+    const EMOJIS     = ['❤️', '👍', '😢', '👎'];
+
+    if (!SHARED_ID) return;
+
+    let lastId  = null;
+    let sending = false;
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function buildBubble(msg) {
+        const reactions = EMOJIS.map(e => {
+            const cnt    = msg.reactions[e] || 0;
+            const active = msg.my_reactions.includes(e);
+            return `<button class="chat-react-btn btn btn-sm"
+                            data-mid="${msg.id}" data-emoji="${e}"
+                            style="padding:1px 8px;font-size:.75rem;border-radius:12px;
+                                   background:${active ? 'rgba(232,115,107,.15)' : 'transparent'};
+                                   border:1px solid ${active ? 'var(--clr-primary-from)' : '#dee2e6'};
+                                   color:inherit">
+                        ${e}${cnt ? ' ' + cnt : ''}
+                    </button>`;
+        }).join('');
+
+        if (msg.is_mine) {
+            return `
+            <div class="d-flex flex-column align-items-end mb-3" data-mid="${msg.id}">
+                <div class="text-muted mb-1" style="font-size:.72rem">${esc(msg.created_at)}</div>
+                <div class="d-flex flex-column align-items-end" style="max-width:90%">
+                    <div class="px-3 py-2 rounded-3 text-white chat-bubble-out"
+                         style="word-break:break-word;
+                                background:linear-gradient(135deg,var(--clr-primary-from),var(--clr-primary-to))">
+                        ${esc(msg.text)}
+                    </div>
+                    <div class="d-flex align-items-center gap-1 mt-1">
+                        <button class="chat-del-btn btn btn-sm"
+                                data-mid="${msg.id}"
+                                style="opacity:.35;background:none;border:none;padding:2px 4px"
+                                title="Удалить">
+                            <i class="bi bi-trash3"></i>
+                        </button>
+                        ${reactions}
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        const av = msg.author.avatar || '👤';
+        return `
+        <div class="d-flex flex-column align-items-start mb-3" data-mid="${msg.id}">
+            <div class="text-muted mb-1" style="font-size:.72rem">
+                ${esc(av)} ${esc(msg.author.username)} · ${esc(msg.created_at)}
+            </div>
+            <div class="d-flex flex-column align-items-start" style="max-width:90%">
+                <div class="px-3 py-2 rounded-3"
+                     style="word-break:break-word;background:var(--bs-secondary-bg)">
+                    ${esc(msg.text)}
+                </div>
+                <div class="d-flex gap-1 mt-1">${reactions}</div>
+            </div>
+        </div>`;
+    }
+
+    function attachHandlers() {
+        document.querySelectorAll('.chat-react-btn').forEach(btn => {
+            btn.onclick = () => {
+                const fd = new FormData();
+                fd.append('emoji', btn.dataset.emoji);
+                fetch(`/api/shared/${SHARED_ID}/messages/${btn.dataset.mid}/react`, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                    body: fd,
+                }).then(() => { lastId = null; load(); });
+            };
+        });
+
+        document.querySelectorAll('.chat-del-btn').forEach(btn => {
+            btn.onclick = () => {
+                if (!confirm('Удалить сообщение?')) return;
+                fetch(`/api/shared/${SHARED_ID}/messages/${btn.dataset.mid}`, {
+                    method: 'DELETE',
+                    headers: {'X-CSRFToken': CSRF_TOKEN},
+                }).then(() => { lastId = null; load(); });
+            };
+        });
+    }
+
+    function load() {
+        if (document.hidden) return;
+        fetch(`/api/shared/${SHARED_ID}/messages`)
+            .then(r => r.json())
+            .then(msgs => {
+                const newId = msgs.length ? msgs[msgs.length - 1].id : null;
+                if (newId === lastId) return;
+
+                const box   = document.getElementById('chatMessages');
+                const empty = document.getElementById('chatEmpty');
+                const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+
+                if (!msgs.length) {
+                    if (empty) empty.style.display = '';
+                    return;
+                }
+                if (empty) empty.style.display = 'none';
+
+                box.innerHTML = msgs.map(buildBubble).join('');
+                lastId = newId;
+                if (atEnd) box.scrollTop = box.scrollHeight;
+                attachHandlers();
+            })
+            .catch(() => {});
+    }
+
+    function send() {
+        if (sending) return;
+        const input = document.getElementById('chatInput');
+        const text  = input.value.trim();
+        if (!text) return;
+        sending = true;
+        const fd = new FormData();
+        fd.append('text', text);
+        input.value = '';
+        fetch(`/api/shared/${SHARED_ID}/messages`, {
+            method: 'POST',
+            headers: {'X-CSRFToken': CSRF_TOKEN},
+            body: fd,
+        }).then(() => { lastId = null; load(); })
+          .finally(() => { sending = false; });
+    }
+
+    document.getElementById('chatSend').addEventListener('click', send);
+    document.getElementById('chatInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+
+    load();
+    setInterval(load, 4000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) load();
+    });
+})();
+</script>
+{% endblock %}
