@@ -89,7 +89,8 @@
         <div class="modal-footer border-0 pt-0 justify-content-center gap-2">
           <button type="button" class="btn btn-outline-secondary btn-sm px-4"
                   data-bs-dismiss="modal">Отмена</button>
-          <button type="button" class="btn btn-danger btn-sm px-4" id="deleteMsgConfirm">
+          <button type="button" class="btn btn-danger btn-sm px-4" id="deleteMsgConfirm"
+                  data-bs-dismiss="modal">
             Удалить
           </button>
         </div>
@@ -311,17 +312,21 @@
 
 {% block scripts %}
 <script>
-// Инициализация модала удаления — после загрузки Bootstrap
 (function() {
-    const _modalEl = document.getElementById('deleteMsgModal');
-    if (!_modalEl) return;
-    const modal = bootstrap.Modal.getOrCreateInstance(_modalEl);
-    _modalEl.addEventListener('chatDeleteReady', function(e) {
-        document.getElementById('deleteMsgConfirm').onclick = function() {
-            modal.hide();
-            e.detail.onConfirm();
-        };
+    const modalEl = document.getElementById('deleteMsgModal');
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    let pendingCallback = null;
+
+    modalEl.addEventListener('chatDeleteReady', function(e) {
+        pendingCallback = e.detail.onConfirm;
         modal.show();
+    });
+
+    document.getElementById('deleteMsgConfirm').addEventListener('click', function() {
+        if (pendingCallback) pendingCallback();
+        pendingCallback = null;
+        // Закрытие через data-bs-dismiss на кнопке
     });
 })();
 </script>
