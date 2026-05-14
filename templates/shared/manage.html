@@ -188,7 +188,7 @@
         fetch(`/api/shared/${SHARED_ID}/messages/${mid}`, {
             method: 'DELETE',
             headers: {'X-CSRFToken': CSRF_TOKEN},
-        }).then(() => { lastId = null; });
+        }).then(() => { lastId = null; load(); });
     }
 
     function confirmDelete(mid, el) {
