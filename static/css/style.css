@@ -130,10 +130,10 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
     cursor: pointer;
     font-size: 1.15rem;
     line-height: 1;
-    padding: 4px 6px;
+    padding: 6px 8px;
     margin-left: auto;
-    min-width: 32px;
-    min-height: 32px;
+    min-width: 44px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -191,12 +191,18 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
         align-items: center;
         justify-content: center;
         gap: 2px;
-        font-size: .65rem;
+        font-size: .75rem;
         color: var(--bs-secondary-color);
         text-decoration: none;
         padding: 6px 4px;
         border-radius: 0;
-        transition: color 0.15s, background 0.15s;
+        transition: color 0.15s, background 0.15s, transform 0.1s;
+    }
+
+    .bottom-nav a:active,
+    .bottom-more-btn:active {
+        transform: scale(0.92);
+        opacity: 0.75;
     }
 
     .bottom-nav a i {
@@ -256,7 +262,7 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
         align-items: center;
         justify-content: center;
         gap: 2px;
-        font-size: .65rem;
+        font-size: .75rem;
         color: var(--bs-secondary-color);
         background: none;
         border: none;
@@ -535,7 +541,7 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
 /* Иконка перехода при наведении на кликабельную карточку */
 .month-pill[data-year] .mp-name::after {
     content: ' ↗';
-    font-size: 0.6rem;
+    font-size: 0.75rem;
     opacity: 0;
     transition: opacity 0.15s ease;
 }
@@ -562,7 +568,7 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
 .month-pill.is-current .mp-name { color: var(--stat-accent); }
 .month-pill .mp-inc   { font-size: 0.82rem; font-weight: 600; color: #198754; }
 .month-pill .mp-exp   { font-size: 0.82rem; font-weight: 600; color: #dc3545; }
-.month-pill .mp-delta { font-size: 0.68rem; color: var(--bs-secondary-color); margin-top: 4px; }
+.month-pill .mp-delta { font-size: 0.75rem; color: var(--bs-secondary-color); margin-top: 4px; }
 
 [data-bs-theme="dark"] .month-pill .mp-inc { color: #00ffb8; }
 [data-bs-theme="dark"] .month-pill .mp-exp { color: #ff6b81; }
@@ -709,8 +715,8 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     color: var(--bs-secondary-color);
     text-decoration: none;
     transition: color .15s, background .15s;
@@ -760,6 +766,15 @@ a, button, [role="button"], [role="link"], label, select, input[type="submit"], 
 }
 [data-bs-theme="dark"] .debt-dash-card:hover {
     box-shadow: 0 6px 20px rgba(0,0,0,.4) !important;
+}
+
+/* ── Flash-уведомления: slide-down при появлении ─────────────── */
+@keyframes alert-slide-down {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.js-auto-dismiss {
+    animation: alert-slide-down 0.25s ease both;
 }
 
 /* ── Чат: пузырьки исходящих сообщений в тёмной теме ─────────── */

@@ -130,7 +130,8 @@
             const active = msg.my_reactions.includes(e);
             return `<button class="chat-react-btn btn btn-sm"
                             data-mid="${msg.id}" data-emoji="${e}"
-                            style="padding:1px 8px;font-size:.75rem;border-radius:12px;
+                            style="padding:4px 10px;font-size:.8rem;border-radius:12px;
+                                   min-height:32px;min-width:36px;
                                    background:${active ? 'rgba(232,115,107,.15)' : 'transparent'};
                                    border:1px solid ${active ? 'var(--clr-primary-from)' : '#dee2e6'};
                                    color:inherit">
@@ -244,8 +245,18 @@
           .finally(() => { sending = false; });
     }
 
-    document.getElementById('chatSend').addEventListener('click', send);
-    document.getElementById('chatInput').addEventListener('keydown', e => {
+    const chatSend  = document.getElementById('chatSend');
+    const chatInput = document.getElementById('chatInput');
+
+    function syncSendBtn() {
+        chatSend.disabled = chatInput.value.trim() === '';
+        chatSend.style.opacity = chatSend.disabled ? '0.45' : '1';
+    }
+    chatInput.addEventListener('input', syncSendBtn);
+    syncSendBtn();
+
+    chatSend.addEventListener('click', send);
+    chatInput.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
 
