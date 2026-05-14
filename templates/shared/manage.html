@@ -198,35 +198,34 @@
         </div>`;
     }
 
-    let pendingDeleteId = null;
-    let pendingDeleteEl = null;
-    let deleteMsgModal  = null;
-    try {
-        const modalEl = document.getElementById('deleteMsgModal');
-        if (modalEl) deleteMsgModal = new bootstrap.Modal(modalEl);
-    } catch(e) {}
-
-    document.getElementById('deleteMsgConfirm')?.addEventListener('click', () => {
-        if (!pendingDeleteId) return;
-        const mid = pendingDeleteId;
-        const el  = pendingDeleteEl;
-        deleteMsgModal.hide();
-        pendingDeleteId = null;
-        pendingDeleteEl = null;
-
-        // Мгновенно скрываем элемент
+    function deleteMessage(mid, el) {
         if (el) {
             el.style.transition = 'opacity .2s, transform .2s';
             el.style.opacity    = '0';
             el.style.transform  = 'scale(0.95)';
             setTimeout(() => el.remove(), 200);
         }
-
         fetch(`/api/shared/${SHARED_ID}/messages/${mid}`, {
             method: 'DELETE',
             headers: {'X-CSRFToken': CSRF_TOKEN},
         }).then(() => { lastId = null; });
-    });
+    }
+
+    const _modalEl = document.getElementById('deleteMsgModal');
+    const deleteMsgModal = _modalEl ? bootstrap.Modal.getOrCreateInstance(_modalEl) : null;
+    let pendingDeleteMid = null;
+    let pendingDeleteEl  = null;
+
+    if (_modalEl) {
+        document.getElementById('deleteMsgConfirm').addEventListener('click', () => {
+            const mid = pendingDeleteMid;
+            const el  = pendingDeleteEl;
+            pendingDeleteMid = null;
+            pendingDeleteEl  = null;
+            deleteMsgModal.hide();
+            deleteMessage(mid, el);
+        });
+    }
 
     function attachHandlers() {
         document.querySelectorAll('.chat-react-btn').forEach(btn => {
@@ -243,15 +242,14 @@
 
         document.querySelectorAll('.chat-del-btn').forEach(btn => {
             btn.onclick = () => {
-                pendingDeleteId = btn.dataset.mid;
-                pendingDeleteEl = btn.closest('[data-mid]');
+                const mid = btn.dataset.mid;
+                const el  = btn.closest('[data-mid]');
                 if (deleteMsgModal) {
+                    pendingDeleteMid = mid;
+                    pendingDeleteEl  = el;
                     deleteMsgModal.show();
                 } else {
-                    // fallback если модал не загрузился
-                    if (confirm('Удалить сообщение?')) {
-                        document.getElementById('deleteMsgConfirm')?.click();
-                    }
+                    if (confirm('Удалить сообщение?')) deleteMessage(mid, el);
                 }
             };
         });
