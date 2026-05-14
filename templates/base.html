@@ -63,12 +63,20 @@
                 <i class="bi bi-moon-fill" id="theme-icon-mobile"></i>
             </button>
             {% if current_user.is_authenticated %}
-            <a href="{{ url_for('profile') }}"
-               class="rounded-circle bg-white text-primary fw-bold d-inline-flex align-items-center
-                      justify-content-center text-decoration-none"
-               style="width:34px;height:34px;font-size:{% if current_user.avatar %}1.1rem{% else %}.85rem{% endif %};flex-shrink:0">
-                {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
-            </a>
+            <span class="position-relative" style="flex-shrink:0">
+                <a href="{{ url_for('profile') }}"
+                   class="rounded-circle bg-white text-primary fw-bold d-inline-flex align-items-center
+                          justify-content-center text-decoration-none"
+                   style="width:34px;height:34px;font-size:{% if current_user.avatar %}1.1rem{% else %}.85rem{% endif %}">
+                    {% if current_user.avatar %}{{ current_user.avatar }}{% else %}{{ current_user.username[0].upper() }}{% endif %}
+                </a>
+                {% if pending_invitations_count %}
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark"
+                      style="font-size:.55rem;min-width:14px;padding:2px 4px">
+                    {{ pending_invitations_count }}
+                </span>
+                {% endif %}
+            </span>
             {% endif %}
         </div>
 
@@ -381,12 +389,44 @@
         <span>Доходы</span>
     </a>
     <div class="dropup bottom-more-dropup">
-        <button class="bottom-more-btn {% if request.endpoint in ('budget', 'savings_list', 'debts_list') or (request.endpoint and 'savings' in request.endpoint) or (request.endpoint and 'debt' in request.endpoint) %}active{% endif %}"
+        <button class="bottom-more-btn {% if request.endpoint in ('budget', 'savings_list', 'debts_list') or (request.endpoint and 'savings' in request.endpoint) or (request.endpoint and 'debt' in request.endpoint) %}active{% endif %} position-relative"
                 data-bs-toggle="dropdown" aria-expanded="false">
             <i class="bi bi-grid-3x3-gap"></i>
             <span>Ещё</span>
+            {% if pending_invitations_count %}
+            <span class="position-absolute badge rounded-pill bg-warning text-dark"
+                  style="font-size:.5rem;min-width:13px;padding:2px 3px;top:6px;right:8px">
+                {{ pending_invitations_count }}
+            </span>
+            {% endif %}
         </button>
         <ul class="dropdown-menu mb-2 bottom-more-menu">
+            {% if pending_invitations %}
+            <li><span class="dropdown-header" style="font-size:.72rem"><i class="bi bi-envelope me-1"></i>Приглашения</span></li>
+            {% for inv in pending_invitations %}
+            <li>
+                <div class="px-3 py-2 border-bottom">
+                    <div class="fw-semibold small">{{ inv.shared_account.name }}</div>
+                    <div class="text-muted" style="font-size:.72rem">от {{ inv.invited_by.username }}</div>
+                    <div class="d-flex gap-2 mt-2">
+                        <form method="post" action="{{ url_for('invitation_accept', inv_id=inv.id) }}" class="m-0">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-success btn-sm py-0 px-2" style="font-size:.75rem">
+                                <i class="bi bi-check2"></i> Принять
+                            </button>
+                        </form>
+                        <form method="post" action="{{ url_for('invitation_decline', inv_id=inv.id) }}" class="m-0">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:.75rem">
+                                Отклонить
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </li>
+            {% endfor %}
+            <li><hr class="dropdown-divider"></li>
+            {% endif %}
             <li>
                 <a class="dropdown-item {% if request.endpoint == 'budget' %}fw-semibold text-primary{% endif %}"
                    href="{{ url_for('budget', year=nav_year, month=nav_month) }}">
