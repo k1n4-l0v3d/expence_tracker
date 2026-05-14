@@ -77,27 +77,6 @@
       </div>
     </div>
   </div>
-  {# ── Модал подтверждения удаления сообщения ─────────────────── #}
-  <div class="modal fade" id="deleteMsgModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
-      <div class="modal-content">
-        <div class="modal-body text-center py-4">
-          <i class="bi bi-trash3 text-danger mb-3" style="font-size:2rem"></i>
-          <p class="mb-0 fw-semibold">Удалить сообщение?</p>
-          <p class="text-muted small mb-0">Это действие нельзя отменить</p>
-        </div>
-        <div class="modal-footer border-0 pt-0 justify-content-center gap-2">
-          <button type="button" class="btn btn-outline-secondary btn-sm px-4"
-                  data-bs-dismiss="modal">Отмена</button>
-          <button type="button" class="btn btn-danger btn-sm px-4" id="deleteMsgConfirm"
-                  data-bs-dismiss="modal">
-            Удалить
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   {# ── Чат ────────────────────────────────────────────────────── #}
   <div class="col-12 mt-2">
     <div class="card shadow-sm">
@@ -308,6 +287,26 @@
     });
 })();
 </script>
+{% endblock %}
+
+{% block modals %}
+<div class="modal fade" id="deleteMsgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-body text-center py-4">
+        <i class="bi bi-trash3 text-danger mb-3" style="font-size:2rem"></i>
+        <p class="mb-0 fw-semibold">Удалить сообщение?</p>
+        <p class="text-muted small mb-0">Это действие нельзя отменить</p>
+      </div>
+      <div class="modal-footer border-0 pt-0 justify-content-center gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm px-4"
+                data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-danger btn-sm px-4" id="deleteMsgConfirm"
+                data-bs-dismiss="modal">Удалить</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
