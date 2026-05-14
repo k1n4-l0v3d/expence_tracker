@@ -38,3 +38,8 @@ ExpenseTracker.app/
 
 # Brainstorm companion
 .superpowers/
+
+# База данных
+instance/
+*.db
+*.sqlite3

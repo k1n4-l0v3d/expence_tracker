@@ -42,6 +42,23 @@
                 <i class="bi bi-question-lg"></i>
             </button>
             {% endif %}
+            {% if current_user.is_authenticated %}
+            <div class="dropstart">
+                <button class="btn btn-sm btn-outline-light" id="sound-toggle-mobile"
+                        data-bs-toggle="dropdown" title="Стиль звука">
+                    <i class="bi bi-volume-up-fill" id="sound-icon-mobile"></i>
+                </button>
+                <ul class="dropdown-menu">
+                    <li><span class="dropdown-header" style="font-size:.72rem">Стиль звука</span></li>
+                    <li><button class="dropdown-item sound-style-btn" data-style="neutral"><i class="bi bi-soundwave me-2 text-secondary"></i>Нейтральный</button></li>
+                    <li><button class="dropdown-item sound-style-btn" data-style="soft"><i class="bi bi-soundwave me-2 text-info"></i>Мягкий</button></li>
+                    <li><button class="dropdown-item sound-style-btn" data-style="retro"><i class="bi bi-soundwave me-2 text-warning"></i>Ретро</button></li>
+                    <li><button class="dropdown-item sound-style-btn" data-style="chime"><i class="bi bi-soundwave me-2 text-success"></i>Колокольчик</button></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item sound-style-btn" data-style="off"><i class="bi bi-volume-mute me-2 text-danger"></i>Выключить</button></li>
+                </ul>
+            </div>
+            {% endif %}
             <button class="btn btn-sm btn-outline-light" id="theme-toggle-mobile" title="Сменить тему">
                 <i class="bi bi-moon-fill" id="theme-icon-mobile"></i>
             </button>
@@ -269,15 +286,15 @@
 
 {% if current_user.is_authenticated and active_shared_account %}
 <div id="shared-banner" class="shared-banner">
-    <i class="bi bi-people-fill" style="flex-shrink:0;opacity:.75"></i>
-    <a href="{{ url_for('shared_manage', shared_id=active_shared_account.id) }}"
-       class="banner-name" aria-label="Управление общим счётом {{ active_shared_account.name }}">
-        {{ active_shared_account.name }}
-    </a>
-    <span class="banner-type-badge"><i class="bi bi-people-fill"></i> совм.</span>
-    <a href="{{ url_for('shared_switch_personal') }}" class="banner-pill">
-        <i class="bi bi-person"></i> Личный
-    </a>
+    <div class="banner-switcher">
+        <a href="{{ url_for('shared_manage', shared_id=active_shared_account.id) }}"
+           class="banner-switcher-active" aria-label="Управление общим счётом {{ active_shared_account.name }}">
+            <i class="bi bi-people-fill"></i> {{ active_shared_account.name }}
+        </a>
+        <a href="{{ url_for('shared_switch_personal') }}" class="banner-switcher-inactive">
+            <i class="bi bi-person"></i> Личный
+        </a>
+    </div>
     <a href="{{ url_for('shared_switch_personal') }}" class="banner-close"
        aria-label="Выйти из совместного режима">×</a>
 </div>
@@ -388,6 +405,31 @@
                     <i class="bi bi-arrow-left-right me-2 text-primary"></i>Долги
                 </a>
             </li>
+            <li><hr class="dropdown-divider"></li>
+            <li><span class="dropdown-header" style="font-size:.72rem">Счёт</span></li>
+            <li>
+                <a class="dropdown-item {% if not active_shared_account %}fw-semibold{% endif %}"
+                   href="{{ url_for('shared_switch_personal') }}">
+                    <i class="bi bi-person me-2 {% if not active_shared_account %}text-primary{% else %}text-secondary{% endif %}"></i>Личный
+                    {% if not active_shared_account %}<i class="bi bi-check2 ms-1 text-success"></i>{% endif %}
+                </a>
+            </li>
+            {% for sa in user_shared_accounts %}
+            <li>
+                <a class="dropdown-item {% if active_shared_account and active_shared_account.id == sa.id %}fw-semibold{% endif %}"
+                   href="{{ url_for('shared_switch', shared_id=sa.id) }}">
+                    <i class="bi bi-people-fill me-2 {% if active_shared_account and active_shared_account.id == sa.id %}text-primary{% else %}text-secondary{% endif %}"></i>{{ sa.name }}
+                    {% if active_shared_account and active_shared_account.id == sa.id %}<i class="bi bi-check2 ms-1 text-success"></i>{% endif %}
+                </a>
+            </li>
+            {% endfor %}
+            {% if not user_shared_accounts %}
+            <li>
+                <a class="dropdown-item text-primary" href="{{ url_for('shared_create') }}">
+                    <i class="bi bi-plus-circle me-2"></i>Создать общий счёт
+                </a>
+            </li>
+            {% endif %}
         </ul>
     </div>
 </nav>
@@ -703,11 +745,18 @@ function toggleDontShow(cb) {
 
     // Стиль звука из localStorage
     (function () {
-        var icon = document.getElementById('sound-icon');
+        var icon       = document.getElementById('sound-icon');
+        var iconMobile = document.getElementById('sound-icon-mobile');
+        var toggleBtn  = document.getElementById('sound-toggle');
+        var toggleMob  = document.getElementById('sound-toggle-mobile');
         function updateIcon() {
             var s = localStorage.getItem('soundStyle') || 'neutral';
-            icon.className = s === 'off' ? 'bi bi-volume-mute-fill' : 'bi bi-volume-up-fill';
-            document.getElementById('sound-toggle').style.opacity = s === 'off' ? '0.5' : '1';
+            var cls = s === 'off' ? 'bi bi-volume-mute-fill' : 'bi bi-volume-up-fill';
+            var op  = s === 'off' ? '0.5' : '1';
+            if (icon)       icon.className          = cls;
+            if (iconMobile) iconMobile.className     = cls;
+            if (toggleBtn)  toggleBtn.style.opacity  = op;
+            if (toggleMob)  toggleMob.style.opacity  = op;
             document.querySelectorAll('.sound-style-btn').forEach(function(b) {
                 b.classList.toggle('active', b.dataset.style === s);
             });
