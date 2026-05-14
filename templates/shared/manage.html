@@ -178,7 +178,9 @@
         </div>`;
     }
 
-    function deleteMessage(mid, el) {
+    function deleteMessage(mid) {
+        // Ищем элемент заново — старая ссылка могла устареть после перерисовки load()
+        const el = document.querySelector(`[data-mid="${mid}"]`);
         if (el) {
             el.style.transition = 'opacity .2s, transform .2s';
             el.style.opacity    = '0';
@@ -191,15 +193,15 @@
         }).then(() => { lastId = null; });
     }
 
-    function confirmDelete(mid, el) {
+    function confirmDelete(mid) {
         const modalEl = document.getElementById('deleteMsgModal');
         if (modalEl) {
             const ev = new CustomEvent('chatDeleteReady', {
-                detail: { onConfirm: () => deleteMessage(mid, el) }
+                detail: { onConfirm: () => deleteMessage(mid) }
             });
             modalEl.dispatchEvent(ev);
         } else {
-            if (confirm('Удалить сообщение?')) deleteMessage(mid, el);
+            if (confirm('Удалить сообщение?')) deleteMessage(mid);
         }
     }
 
@@ -217,7 +219,7 @@
         });
 
         document.querySelectorAll('.chat-del-btn').forEach(btn => {
-            btn.onclick = () => confirmDelete(btn.dataset.mid, btn.closest('[data-mid]'));
+            btn.onclick = () => confirmDelete(btn.dataset.mid);
         });
     }
 
