@@ -211,20 +211,16 @@
         }).then(() => { lastId = null; });
     }
 
-    const _modalEl = document.getElementById('deleteMsgModal');
-    const deleteMsgModal = _modalEl ? bootstrap.Modal.getOrCreateInstance(_modalEl) : null;
-    let pendingDeleteMid = null;
-    let pendingDeleteEl  = null;
-
-    if (_modalEl) {
-        document.getElementById('deleteMsgConfirm').addEventListener('click', () => {
-            const mid = pendingDeleteMid;
-            const el  = pendingDeleteEl;
-            pendingDeleteMid = null;
-            pendingDeleteEl  = null;
-            deleteMsgModal.hide();
-            deleteMessage(mid, el);
-        });
+    function confirmDelete(mid, el) {
+        const modalEl = document.getElementById('deleteMsgModal');
+        if (modalEl) {
+            const ev = new CustomEvent('chatDeleteReady', {
+                detail: { onConfirm: () => deleteMessage(mid, el) }
+            });
+            modalEl.dispatchEvent(ev);
+        } else {
+            if (confirm('Удалить сообщение?')) deleteMessage(mid, el);
+        }
     }
 
     function attachHandlers() {
@@ -241,17 +237,7 @@
         });
 
         document.querySelectorAll('.chat-del-btn').forEach(btn => {
-            btn.onclick = () => {
-                const mid = btn.dataset.mid;
-                const el  = btn.closest('[data-mid]');
-                if (deleteMsgModal) {
-                    pendingDeleteMid = mid;
-                    pendingDeleteEl  = el;
-                    deleteMsgModal.show();
-                } else {
-                    if (confirm('Удалить сообщение?')) deleteMessage(mid, el);
-                }
-            };
+            btn.onclick = () => confirmDelete(btn.dataset.mid, btn.closest('[data-mid]'));
         });
     }
 
@@ -318,6 +304,24 @@
     setInterval(load, 4000);
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) load();
+    });
+})();
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Инициализация модала удаления — после загрузки Bootstrap
+(function() {
+    const _modalEl = document.getElementById('deleteMsgModal');
+    if (!_modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(_modalEl);
+    _modalEl.addEventListener('chatDeleteReady', function(e) {
+        document.getElementById('deleteMsgConfirm').onclick = function() {
+            modal.hide();
+            e.detail.onConfirm();
+        };
+        modal.show();
     });
 })();
 </script>
