@@ -198,11 +198,15 @@
         </div>`;
     }
 
-    let pendingDeleteId   = null;
-    let pendingDeleteEl   = null;
-    const deleteMsgModal  = new bootstrap.Modal(document.getElementById('deleteMsgModal'));
+    let pendingDeleteId = null;
+    let pendingDeleteEl = null;
+    let deleteMsgModal  = null;
+    try {
+        const modalEl = document.getElementById('deleteMsgModal');
+        if (modalEl) deleteMsgModal = new bootstrap.Modal(modalEl);
+    } catch(e) {}
 
-    document.getElementById('deleteMsgConfirm').addEventListener('click', () => {
+    document.getElementById('deleteMsgConfirm')?.addEventListener('click', () => {
         if (!pendingDeleteId) return;
         const mid = pendingDeleteId;
         const el  = pendingDeleteEl;
@@ -241,7 +245,14 @@
             btn.onclick = () => {
                 pendingDeleteId = btn.dataset.mid;
                 pendingDeleteEl = btn.closest('[data-mid]');
-                deleteMsgModal.show();
+                if (deleteMsgModal) {
+                    deleteMsgModal.show();
+                } else {
+                    // fallback если модал не загрузился
+                    if (confirm('Удалить сообщение?')) {
+                        document.getElementById('deleteMsgConfirm')?.click();
+                    }
+                }
             };
         });
     }
@@ -286,18 +297,19 @@
             headers: {'X-CSRFToken': CSRF_TOKEN},
             body: fd,
         }).then(() => { lastId = null; load(); })
-          .finally(() => { sending = false; });
+          .finally(() => { sending = false; syncSendBtn(); });
     }
 
     const chatSend  = document.getElementById('chatSend');
     const chatInput = document.getElementById('chatInput');
 
     function syncSendBtn() {
-        chatSend.disabled = chatInput.value.trim() === '';
-        chatSend.style.opacity = chatSend.disabled ? '0.45' : '1';
+        const empty = chatInput.value.trim() === '';
+        chatSend.disabled = empty;
+        chatSend.style.opacity = empty ? '0.45' : '1';
     }
     chatInput.addEventListener('input', syncSendBtn);
-    syncSendBtn();
+    // Не вызываем syncSendBtn() при старте — кнопка активна по умолчанию
 
     chatSend.addEventListener('click', send);
     chatInput.addEventListener('keydown', e => {
